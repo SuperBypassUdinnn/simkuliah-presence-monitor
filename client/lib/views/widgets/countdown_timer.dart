@@ -46,7 +46,7 @@ class _CountdownTimerWidgetState extends State<CountdownTimerWidget> {
     if (remaining.isNegative) {
       return const Text('00:00');
     }
-    final minutes = remaining.inMinutes.remainder(60);
+    final minutes = remaining.inMinutes;
     final seconds = remaining.inSeconds.remainder(60);
     return Text(
       '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}',

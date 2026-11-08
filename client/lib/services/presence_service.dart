@@ -51,6 +51,16 @@ class PresenceService {
     return response.map(ScheduleModel.fromJson).toList();
   }
 
+  /// Fetch the meetings of one schedule, ordered by meeting number.
+  Future<List<MeetingModel>> fetchMeetingsForSchedule({required int scheduleId}) async {
+    final response = await _client
+        .from(_tableMeetings)
+        .select()
+        .eq('schedule_id', scheduleId)
+        .order('meeting_number');
+    return response.map(MeetingModel.fromJson).toList();
+  }
+
   /// Submit a presence override (izin / sakit / alpa) for a meeting.
   Future<void> submitOverride({
     required int meetingId,
