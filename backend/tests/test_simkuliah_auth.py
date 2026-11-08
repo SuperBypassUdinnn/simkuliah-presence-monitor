@@ -7,7 +7,7 @@ handling. All external HTTP is mocked so tests run offline and deterministic.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -77,6 +77,7 @@ async def test_keep_alive_success():
     client = SimkuliahClient(npm="2408107010053", password="test_password")
     mock_response = AsyncMock()
     mock_response.status_code = 200
+    mock_response.raise_for_status = MagicMock()
     client._client.get = AsyncMock(return_value=mock_response)
 
     status = await client.keep_alive()
@@ -88,6 +89,7 @@ async def test_keep_alive_server_error():
     client = SimkuliahClient(npm="2408107010053", password="test_password")
     mock_response = AsyncMock()
     mock_response.status_code = 502
+    mock_response.raise_for_status = MagicMock()
     client._client.get = AsyncMock(return_value=mock_response)
 
     status = await client.keep_alive()
@@ -100,6 +102,7 @@ async def test_fetch_today_schedule_returns_html():
     mock_response = AsyncMock()
     mock_response.status_code = 200
     mock_response.text = "<html><body>today schedule</body></html>"
+    mock_response.raise_for_status = MagicMock()
     client._client.get = AsyncMock(return_value=mock_response)
 
     html = await client.fetch_today_schedule()
@@ -112,6 +115,7 @@ async def test_fetch_semester_matrix_returns_html():
     mock_response = AsyncMock()
     mock_response.status_code = 200
     mock_response.text = "<html><body>semester matrix</body></html>"
+    mock_response.raise_for_status = MagicMock()
     client._client.get = AsyncMock(return_value=mock_response)
 
     html = await client.fetch_semester_matrix()
@@ -123,6 +127,7 @@ async def test_confirm_presence_success():
     client = SimkuliahClient(npm="2408107010053", password="test_password")
     mock_response = AsyncMock()
     mock_response.status_code = 200
+    mock_response.raise_for_status = MagicMock()
     client._client.post = AsyncMock(return_value=mock_response)
 
     status = await client.confirm_presence(schedule_id=101, meeting_no=4)
@@ -134,7 +139,70 @@ async def test_confirm_presence_server_error():
     client = SimkuliahClient(npm="2408107010053", password="test_password")
     mock_response = AsyncMock()
     mock_response.status_code = 500
+    mock_response.raise_for_status = MagicMock()
     client._client.post = AsyncMock(return_value=mock_response)
 
     status = await client.confirm_presence(schedule_id=101, meeting_no=4)
     assert status is False
+
+
+@pytest.mark.asyncio
+async def test_login_redirect_back_to_login_fails():
+    """A 3xx redirect back to /login must be rejected even though HTTP is 3xx."""
+    client = SimkuliahClient(npm="2408107010053", password="test_password")
+
+    with (
+        patch.object(client, "_fetch_captcha", new_callable=AsyncMock) as mock_cap,
+        patch("app.services.simkuliah_client.solve_captcha", return_value="00000"),
+    ):
+        mock_cap.return_value = b"image_data"
+        mock_response = MagicMock()
+        mock_response.status_code = 302
+        mock_response.headers = {"location": "/index.php/login?error=1"}
+        client._client.post = AsyncMock(return_value=mock_response)
+
+        status = await client.login()
+        assert status is False
+
+
+@pytest.mark.asyncio
+async def test_login_redirect_to_dashboard_succeeds():
+    """A 3xx redirect to the dashboard is accepted as authenticated."""
+    client = SimkuliahClient(npm="2408107010053", password="test_password")
+
+    with (
+        patch.object(client, "_fetch_captcha", new_callable=AsyncMock) as mock_cap,
+        patch("app.services.simkuliah_client.solve_captcha", return_value="46272"),
+    ):
+        mock_cap.return_value = b"image_data"
+        mock_response = MagicMock()
+        mock_response.status_code = 302
+        mock_response.headers = {"location": "/index.php/mahasiswa/dashboard"}
+        client._client.post = AsyncMock(return_value=mock_response)
+
+        status = await client.login()
+        assert status is True
+
+
+@pytest.mark.asyncio
+async def test_auth_async_context_manager_closes_client():
+    """SimkuliahAuth supports async context manager protocol and closes on exit."""
+    import os
+
+    os.environ.setdefault("SIMKULIAH_NPM", "2408107010053")
+    os.environ.setdefault("SIMKULIAH_PASSWORD", "test_password")
+    os.environ.setdefault("NTFY_TOPIC", "test-topic")
+    os.environ.setdefault("ACTION_SECRET_KEY", "test-secret-key-32-chars-long-123456")
+    os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
+    os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "service-role-key")
+
+    from app.services.simkuliah_auth import SimkuliahAuth
+
+    auth = SimkuliahAuth.__new__(SimkuliahAuth)
+    auth.client = SimkuliahClient(npm="2408107010053", password="test_password")
+    auth.client.aclose = AsyncMock()
+
+    async with auth:
+        pass
+
+    auth.client.aclose.assert_awaited_once()

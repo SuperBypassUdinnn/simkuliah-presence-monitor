@@ -40,6 +40,17 @@ SERVER_ERROR_STATUS_CODES = {500, 502, 503, 504}
 
 _CAPTCHA_ERROR_MARKERS = ("kode verifikasi salah", "captcha", "verifikasi")
 
+# Markers that indicate a 3xx Location header points back to the login page
+# (authentication failed) rather than an authenticated destination.
+_LOGIN_REDIRECT_MARKERS = ("/login", "login")
+
+# Markers that indicate a 3xx Location header points to an authenticated
+# destination (dashboard or mahasiswa area).
+_AUTHENTICATED_DESTINATION_MARKERS = ("dashboard", "mahasiswa")
+
+# Name of the CodeIgniter session cookie established by a successful login.
+_SESSION_COOKIE_NAME = "ci_session"
+
 
 class SimkuliahClient:
     """Async HTTP client for Simkuliah with a persistent ``ci_session`` cookie jar.
@@ -72,8 +83,6 @@ class SimkuliahClient:
         url = f"{self.base_url}{CAPTCHA_PATH}"
         params = {"t": int(time.time())}
         response = await self._client.get(url, params=params)
-        if response.status_code in SERVER_ERROR_STATUS_CODES:
-            response.raise_for_status()
         response.raise_for_status()
         return response.content
 
@@ -96,9 +105,12 @@ class SimkuliahClient:
             return {"success": False, "error": f"HTTP {response.status_code}"}
 
         if response.status_code in (301, 302, 303, 307, 308):
+            location = response.headers.get("location", "")
+            if self._is_authenticated_redirect(location):
+                return {"success": True, "redirect": location}
             return {
-                "success": True,
-                "redirect": response.headers.get("location", ""),
+                "success": False,
+                "error": "Login redirected back to login page",
             }
 
         body = response.text
@@ -106,6 +118,21 @@ class SimkuliahClient:
             return {"success": False, "error": "Kode verifikasi salah"}
 
         return {"success": False, "error": "Login rejected by server"}
+
+    def _is_authenticated_redirect(self, location: str) -> bool:
+        """Return True when a 3xx Location points to an authenticated destination.
+
+        A redirect back to the login page is treated as a failed authentication
+        even though the HTTP status is 3xx. A redirect to the dashboard or
+        mahasiswa area, or the presence of a ``ci_session`` cookie in the
+        client's cookie jar, counts as authenticated.
+        """
+        lowered = location.lower()
+        if any(marker in lowered for marker in _LOGIN_REDIRECT_MARKERS):
+            return False
+        if any(marker in lowered for marker in _AUTHENTICATED_DESTINATION_MARKERS):
+            return True
+        return _SESSION_COOKIE_NAME in self._client.cookies
 
     # ------------------------------------------------------------------ #
     # Public API

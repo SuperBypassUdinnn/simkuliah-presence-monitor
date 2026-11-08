@@ -8,6 +8,8 @@ schedule/semester fetching, and presence confirmation.
 
 from __future__ import annotations
 
+from typing import Self
+
 from app.config import Settings
 from app.services.captcha import solve_captcha
 from app.services.simkuliah_client import SimkuliahClient
@@ -49,3 +51,13 @@ class SimkuliahAuth:
     async def confirm_presence(self, schedule_id: int, meeting_no: int) -> bool:
         """Confirm presence for the given schedule meeting."""
         return await self.client.confirm_presence(schedule_id, meeting_no)
+
+    async def aclose(self) -> None:
+        """Close the underlying HTTP client and release its connection pool."""
+        await self.client.aclose()
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        await self.aclose()
