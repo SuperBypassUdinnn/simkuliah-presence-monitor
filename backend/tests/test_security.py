@@ -11,6 +11,7 @@ def test_token_creation_and_verification():
     assert verified["action"] == "confirm_presence"
     assert verified["schedule_id"] == 101
 
+
 def test_token_expiration():
     payload = {"action": "confirm_presence"}
     secret = "test-secret-key-32-chars-long-123456"

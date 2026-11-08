@@ -11,7 +11,6 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-
 from app.core.database import DatabaseRepository
 from app.models.schemas import OverrideType
 from app.services.simkuliah_parser import ParsedMeetingStatus, ParsedScheduleItem

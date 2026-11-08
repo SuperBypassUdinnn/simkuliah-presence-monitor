@@ -15,7 +15,6 @@ from datetime import datetime, time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from app.services.poller import (
     AdaptivePoller,
     calculate_next_poll_interval,
@@ -239,7 +238,7 @@ async def test_poller_tick_backoff_on_server_error(poller_deps):
             repo=deps["repo"],
             dispatcher=deps["dispatcher"],
             scheduler=deps["scheduler"],
-            backoff_seconds=5,
+            base_backoff_seconds=5,
         )
         await poller._tick()
 
@@ -293,3 +292,124 @@ async def test_lifespan_poller_is_module_singleton():
     # app's lifetime (startup and shutdown reference the same object).
     assert hasattr(main_module, "poller")
     assert isinstance(main_module.poller, AdaptivePoller)
+
+
+# --------------------------------------------------------------------------- #
+# Exponential backoff and adaptive rescheduling
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_poller_exponential_backoff_escalation_and_reset(poller_deps):
+    deps = poller_deps
+    poller = AdaptivePoller(
+        client=deps["client"],
+        repo=deps["repo"],
+        dispatcher=deps["dispatcher"],
+        scheduler=deps["scheduler"],
+        base_backoff_seconds=30,
+        max_backoff_seconds=300,
+    )
+
+    # 0 failures initially
+    assert poller.consecutive_failures == 0
+    assert poller._current_backoff_seconds() == 30
+
+    # Failure 1 -> 30s
+    poller.consecutive_failures = 1
+    assert poller._current_backoff_seconds() == 30
+
+    # Failure 2 -> 60s
+    poller.consecutive_failures = 2
+    assert poller._current_backoff_seconds() == 60
+
+    # Failure 3 -> 120s
+    poller.consecutive_failures = 3
+    assert poller._current_backoff_seconds() == 120
+
+    # Failure 4 -> 240s
+    poller.consecutive_failures = 4
+    assert poller._current_backoff_seconds() == 240
+
+    # Failure 5 -> capped at 300s
+    poller.consecutive_failures = 5
+    assert poller._current_backoff_seconds() == 300
+
+    # Failure 10 -> capped at 300s
+    poller.consecutive_failures = 10
+    assert poller._current_backoff_seconds() == 300
+
+    # Tick with successful fetch resets consecutive_failures to 0
+    deps["client"].fetch_today_schedule = AsyncMock(
+        return_value="<html>no courses</html>"
+    )
+    with patch("app.services.poller.parse_daily_schedule", return_value=[]):
+        await poller._tick()
+
+    assert poller.consecutive_failures == 0
+
+
+@pytest.mark.asyncio
+async def test_poller_tick_reschedules_adaptive_interval(poller_deps):
+    deps = poller_deps
+    deps["client"].fetch_today_schedule = AsyncMock(return_value="<html>mock</html>")
+
+    poller = AdaptivePoller(
+        client=deps["client"],
+        repo=deps["repo"],
+        dispatcher=deps["dispatcher"],
+        scheduler=deps["scheduler"],
+    )
+
+    with (
+        patch("app.services.poller.parse_daily_schedule", return_value=[]),
+        patch("app.services.poller.calculate_next_poll_interval", return_value=60),
+    ):
+        await poller._tick()
+
+    deps["scheduler"].reschedule_job.assert_called_once()
+    args, _kwargs = deps["scheduler"].reschedule_job.call_args
+    assert args[0] == "adaptive_poller_tick"
+
+
+@pytest.mark.asyncio
+async def test_poller_tick_tracks_last_level_prevents_duplicate_notifications(
+    poller_deps,
+):
+    from app.services.simkuliah_parser import ParsedScheduleItem
+    from app.services.state_machine import NotificationLevel
+
+    deps = poller_deps
+    deps["client"].fetch_today_schedule = AsyncMock(return_value="<html>mock</html>")
+
+    poller = AdaptivePoller(
+        client=deps["client"],
+        repo=deps["repo"],
+        dispatcher=deps["dispatcher"],
+        scheduler=deps["scheduler"],
+    )
+
+    item = ParsedScheduleItem(
+        course_code="INF101",
+        course_name="Dasar Pemrograman",
+        room="R101",
+        start_time="08:00",
+        end_time="09:40",
+        lecturer="Dr. Dosen",
+    )
+
+    with (
+        patch("app.services.poller.parse_daily_schedule", return_value=[item]),
+        patch("app.services.poller.calculate_next_poll_interval", return_value=60),
+        patch(
+            "app.services.poller.evaluate_notification_state",
+            return_value=NotificationLevel.CLASS_STARTED,
+        ),
+    ):
+        # First tick dispatches
+        await poller._tick()
+        assert deps["dispatcher"].dispatch.call_count == 1
+
+        # Second tick with same state is suppressed
+        await poller._tick()
+        assert deps["dispatcher"].dispatch.call_count == 1
