@@ -1,0 +1,213 @@
+"""Simkuliah async HTTP client with persistent cookie-based session management.
+
+Wraps ``httpx.AsyncClient`` so the ``ci_session`` CodeIgniter session cookie is
+persisted across requests. Provides login with CAPTCHA retry, a keep-alive
+heartbeat, schedule/semester matrix fetching, and presence confirmation.
+
+Endpoints (reverse-engineered from the USK Simkuliah CodeIgniter portal):
+
+* ``POST /index.php/login/auth``              - login (username, password, captcha_answer)
+* ``GET  /index.php/login/captcha_image``     - CAPTCHA image challenge
+* ``GET  /index.php/mahasiswa/dashboard``     - dashboard (keep-alive target)
+* ``GET  /index.php/mahasiswa/jadwal_hari_ini`` - today's schedule HTML
+* ``GET  /index.php/mahasiswa/matriks_semester``- semester presence matrix HTML
+* ``POST /index.php/mahasiswa/presensi/simpan_presensi`` - presence confirmation
+"""
+
+from __future__ import annotations
+
+import time
+from typing import Any
+
+import httpx
+
+from app.services.captcha import solve_captcha
+
+BASE_URL = "https://simkuliah.usk.ac.id"
+
+LOGIN_PATH = "/index.php/login/auth"
+CAPTCHA_PATH = "/index.php/login/captcha_image"
+DASHBOARD_PATH = "/index.php/mahasiswa/dashboard"
+TODAY_SCHEDULE_PATH = "/index.php/mahasiswa/jadwal_hari_ini"
+SEMESTER_MATRIX_PATH = "/index.php/mahasiswa/matriks_semester"
+PRESENCE_PATH = "/index.php/mahasiswa/presensi/simpan_presensi"
+
+MAX_LOGIN_ATTEMPTS = 3
+
+# HTTP status codes treated as Simkuliah gateway/server errors that must be
+# handled cleanly without crashing the caller.
+SERVER_ERROR_STATUS_CODES = {500, 502, 503, 504}
+
+_CAPTCHA_ERROR_MARKERS = ("kode verifikasi salah", "captcha", "verifikasi")
+
+
+class SimkuliahClient:
+    """Async HTTP client for Simkuliah with a persistent ``ci_session`` cookie jar.
+
+    Args:
+        npm: Student NIP/NPM used as the login username.
+        password: Student account password.
+        base_url: Base Simkuliah origin (default production USK portal).
+    """
+
+    def __init__(
+        self,
+        npm: str,
+        password: str,
+        base_url: str = BASE_URL,
+    ) -> None:
+        self.npm = npm
+        self.password = password
+        self.base_url = base_url.rstrip("/")
+        # httpx.AsyncClient keeps a persistent cookie jar, so ci_session set by
+        # the login response is automatically reused on subsequent requests.
+        self._client = httpx.AsyncClient()
+
+    # ------------------------------------------------------------------ #
+    # Internal request helpers
+    # ------------------------------------------------------------------ #
+
+    async def _fetch_captcha(self) -> bytes:
+        """Fetch a fresh CAPTCHA image and return its raw bytes."""
+        url = f"{self.base_url}{CAPTCHA_PATH}"
+        params = {"t": int(time.time())}
+        response = await self._client.get(url, params=params)
+        if response.status_code in SERVER_ERROR_STATUS_CODES:
+            response.raise_for_status()
+        response.raise_for_status()
+        return response.content
+
+    async def _submit_login_form(self, captcha_answer: str) -> dict[str, Any]:
+        """Submit the login form and return a normalised result dict.
+
+        Returns a dict with a ``success`` boolean plus either a ``redirect``
+        location (on success) or an ``error`` message (on failure).
+        """
+        response = await self._client.post(
+            f"{self.base_url}{LOGIN_PATH}",
+            data={
+                "username": self.npm,
+                "password": self.password,
+                "captcha_answer": captcha_answer,
+            },
+            allow_redirects=False,
+        )
+        if response.status_code in SERVER_ERROR_STATUS_CODES:
+            return {"success": False, "error": f"HTTP {response.status_code}"}
+
+        if response.status_code in (301, 302, 303, 307, 308):
+            return {
+                "success": True,
+                "redirect": response.headers.get("location", ""),
+            }
+
+        body = response.text
+        if any(marker in body.lower() for marker in _CAPTCHA_ERROR_MARKERS):
+            return {"success": False, "error": "Kode verifikasi salah"}
+
+        return {"success": False, "error": "Login rejected by server"}
+
+    # ------------------------------------------------------------------ #
+    # Public API
+    # ------------------------------------------------------------------ #
+
+    async def login(self) -> bool:
+        """Authenticate against Simkuliah with up to 3 CAPTCHA retry attempts.
+
+        Each attempt fetches a fresh CAPTCHA image, solves it via
+        :func:`solve_captcha`, and submits the login form. A "Kode verifikasi
+        salah" (or similar CAPTCHA) failure triggers a retry with a new image.
+        Returns ``True`` on successful authentication, ``False`` when all
+        attempts are exhausted.
+        """
+        last_error: str | None = None
+        for _attempt in range(1, MAX_LOGIN_ATTEMPTS + 1):
+            try:
+                image_bytes = await self._fetch_captcha()
+            except httpx.HTTPError:
+                # Transient CAPTCHA fetch error; try again with a fresh image.
+                continue
+
+            captcha_answer = solve_captcha(image_bytes)
+            result = await self._submit_login_form(captcha_answer)
+
+            if result.get("success") is True:
+                return True
+
+            last_error = result.get("error", "unknown error")
+            if not self._is_captcha_error(last_error):
+                # Non-CAPTCHA rejection is not worth retrying.
+                break
+
+        return False
+
+    async def keep_alive(self) -> bool:
+        """Refresh the ``ci_session`` by GETting the dashboard.
+
+        Returns ``True`` when the dashboard is reachable (session alive),
+        ``False`` on server errors (500/502/503/504) or network failure.
+        """
+        try:
+            response = await self._client.get(f"{self.base_url}{DASHBOARD_PATH}")
+            if response.status_code in SERVER_ERROR_STATUS_CODES:
+                return False
+            response.raise_for_status()
+            return True
+        except httpx.HTTPError:
+            return False
+
+    async def fetch_today_schedule(self) -> str:
+        """Return the raw HTML of today's schedule page."""
+        return await self._get_html(TODAY_SCHEDULE_PATH)
+
+    async def fetch_semester_matrix(self) -> str:
+        """Return the raw HTML of the semester presence matrix page."""
+        return await self._get_html(SEMESTER_MATRIX_PATH)
+
+    async def confirm_presence(self, schedule_id: int, meeting_no: int) -> bool:
+        """Confirm presence for a schedule meeting.
+
+        POSTs ``id_jadwal``, ``pertemuan`` and a ``status`` flag to the
+        presence endpoint using the authenticated cookie jar.
+        """
+        try:
+            response = await self._client.post(
+                f"{self.base_url}{PRESENCE_PATH}",
+                data={
+                    "id_jadwal": schedule_id,
+                    "pertemuan": meeting_no,
+                    "status": "hadir",
+                },
+            )
+            if response.status_code in SERVER_ERROR_STATUS_CODES:
+                return False
+            response.raise_for_status()
+            return True
+        except httpx.HTTPError:
+            return False
+
+    async def aclose(self) -> None:
+        """Close the underlying HTTP client and release its connection pool."""
+        await self._client.aclose()
+
+    # ------------------------------------------------------------------ #
+    # Private helpers
+    # ------------------------------------------------------------------ #
+
+    async def _get_html(self, path: str) -> str:
+        """GET ``path`` and return its body as text, or ``""`` on server error."""
+        try:
+            response = await self._client.get(f"{self.base_url}{path}")
+            if response.status_code in SERVER_ERROR_STATUS_CODES:
+                return ""
+            response.raise_for_status()
+            return response.text
+        except httpx.HTTPError:
+            return ""
+
+    @staticmethod
+    def _is_captcha_error(error: str | None) -> bool:
+        if not error:
+            return False
+        lowered = error.lower()
+        return any(marker in lowered for marker in _CAPTCHA_ERROR_MARKERS)
