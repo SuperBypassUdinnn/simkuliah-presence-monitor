@@ -1,0 +1,43 @@
+openapi: 3.0.3
+info:
+  title: simkuliah-presence-monitor API Specification
+  description: OpenAPI contracts for simkuliah-presence-monitor
+  version: 0.1.0
+servers:
+  - url: http://localhost:8080/api/v1
+    description: Local development environment
+
+paths:
+  /health:
+    get:
+      summary: Health check endpoint
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardResponse'
+
+components:
+  schemas:
+    StandardResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+          example: 200
+        message:
+          type: string
+          example: OK
+        data:
+          type: object
+    ErrorResponse:
+      type: object
+      properties:
+        code:
+          type: string
+          example: ERR_INTERNAL_SERVER
+        message:
+          type: string
+          example: An unexpected error occurred
