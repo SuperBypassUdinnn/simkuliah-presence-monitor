@@ -10,6 +10,7 @@
 ///  - [isOverridden]: true when [localOverride] is not null.
 class MeetingModel {
   final int id;
+  final String courseName;
   final int meetingNumber;
   final String meetingDate;
   final String simkuliahStatus;
@@ -19,9 +20,10 @@ class MeetingModel {
 
   const MeetingModel({
     required this.id,
+    this.courseName = 'Mata Kuliah',
     required this.meetingNumber,
-    required this.meetingDate,
-    required this.simkuliahStatus,
+    this.meetingDate = '',
+    this.simkuliahStatus = 'Pending',
     this.localOverride,
     required this.isPresenceOpen,
     this.deadlineAt,
@@ -30,9 +32,10 @@ class MeetingModel {
   factory MeetingModel.fromJson(Map<String, dynamic> json) {
     return MeetingModel(
       id: json['id'] as int,
+      courseName: json['course_name'] as String? ?? 'Mata Kuliah',
       meetingNumber: json['meeting_number'] as int,
-      meetingDate: json['meeting_date'] as String,
-      simkuliahStatus: json['simkuliah_status'] as String,
+      meetingDate: json['meeting_date'] as String? ?? '',
+      simkuliahStatus: json['simkuliah_status'] as String? ?? 'Pending',
       localOverride: json['local_override'] as Map<String, dynamic>?,
       isPresenceOpen: json['is_presence_open'] as bool? ?? false,
       deadlineAt: json['deadline_at'] == null
@@ -70,6 +73,7 @@ class MeetingModel {
   Map<String, dynamic> toJson() {
     return {
       'id': id,
+      'course_name': courseName,
       'meeting_number': meetingNumber,
       'meeting_date': meetingDate,
       'simkuliah_status': simkuliahStatus,
