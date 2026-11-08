@@ -15,7 +15,10 @@ export 'widgets/meeting_grid_tile.dart';
 /// without touching the network, which is useful for offline previews and
 /// widget tests. Otherwise courses and meetings are fetched from
 /// [presenceService] (or [`PresenceService`] when omitted).
-class SemesterMatrixView extends StatelessWidget {
+///
+/// The semester matrix future is initialized once in [State.initState] so
+/// that rebuilds do not re-trigger the network fetch.
+class SemesterMatrixView extends StatefulWidget {
   /// When true, renders a mock course with 16 meetings without calling the
   /// network.
   final bool testMode;
@@ -26,14 +29,32 @@ class SemesterMatrixView extends StatelessWidget {
 
   const SemesterMatrixView({super.key, this.testMode = false, this.presenceService});
 
+  @override
+  State<SemesterMatrixView> createState() => _SemesterMatrixViewState();
+}
+
+class _SemesterMatrixViewState extends State<SemesterMatrixView> {
+  /// Future resolving to the enrolled courses. Initialized once in
+  /// [initState] so rebuilds do not re-trigger the network fetch.
+  late Future<List<ScheduleModel>> _matrixFuture;
+
+  /// Presence service used for live-mode fetches. Only set in live mode.
+  late PresenceService _service;
+
+  @override
+  void initState() {
+    super.initState();
+    if (!widget.testMode) {
+      _service = widget.presenceService ?? PresenceService();
+      _matrixFuture = _service.fetchSemesterMatrix();
+    }
+  }
+
   /// Number of meetings per course in the semester matrix.
   static const int _meetingsPerCourse = 16;
 
   /// Minimum attendance fraction expected of students (75%).
   static const double _attendanceThreshold = 0.75;
-
-  /// Presence service used by this view, defaulting to [`PresenceService`].
-  PresenceService _service(PresenceService? service) => service ?? PresenceService();
 
   /// Mock meetings for test mode: meetings 1..16 with a mix of statuses so
   /// the progress bar, threshold marker, and all five status colors are
@@ -187,7 +208,7 @@ class SemesterMatrixView extends StatelessWidget {
   Widget build(BuildContext context) {
     // Test mode renders a mock course without touching Supabase, which is
     // unavailable in widget tests.
-    if (testMode) {
+    if (widget.testMode) {
       return Scaffold(
         appBar: AppBar(
           title: const Text('Matriks Semester'),
@@ -203,15 +224,14 @@ class SemesterMatrixView extends StatelessWidget {
       );
     }
 
-    // Live mode: fetch courses & meetings from the presence service. The
-    // service is only constructed here, never in test mode.
-    final service = _service(presenceService);
+    // Live mode: courses are fetched once via the memoized [_matrixFuture],
+    // so rebuilds do not re-trigger the network request.
     return Scaffold(
       appBar: AppBar(
         title: const Text('Matriks Semester'),
       ),
       body: FutureBuilder<List<ScheduleModel>>(
-        future: service.fetchSemesterMatrix(),
+        future: _matrixFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
@@ -232,7 +252,7 @@ class SemesterMatrixView extends StatelessWidget {
               final schedule = schedules[index];
               return Padding(
                 padding: const EdgeInsets.only(bottom: 12),
-                child: _courseSectionFuture(context, service, schedule),
+                child: _courseSectionFuture(context, _service, schedule),
               );
             },
           );

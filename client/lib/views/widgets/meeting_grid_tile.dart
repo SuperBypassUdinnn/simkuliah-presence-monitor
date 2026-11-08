@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../models/meeting_model.dart';
-import '../../services/presence_service.dart';
 
 /// Statuses used to color a meeting indicator in the semester matrix.
 enum _MeetingIndicatorStatus {
@@ -21,11 +20,7 @@ class MeetingGridTile extends StatelessWidget {
   /// The meeting to display.
   final MeetingModel meeting;
 
-  /// Optional service used to submit presence or overrides for the meeting.
-  /// When omitted, the tile still renders but action presses are no-ops.
-  final PresenceService? presenceService;
-
-  const MeetingGridTile({super.key, required this.meeting, this.presenceService});
+  const MeetingGridTile({super.key, required this.meeting});
 
   _MeetingIndicatorStatus _status() {
     switch (meeting.effectiveStatus.toLowerCase()) {
