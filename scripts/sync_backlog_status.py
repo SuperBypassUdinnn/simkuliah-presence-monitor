@@ -10,9 +10,7 @@ from pathlib import Path
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Validate planning and backlog parity."
-    )
+    parser = argparse.ArgumentParser(description="Validate planning and backlog parity.")
     parser.add_argument(
         "--check",
         action="store_true",

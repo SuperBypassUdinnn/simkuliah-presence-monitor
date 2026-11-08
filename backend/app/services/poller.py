@@ -66,9 +66,7 @@ def calculate_next_poll_interval(
 
     for start_time, _end_time in active_lectures:
         # Pre-class observation window: [start - 10m, start).
-        pre_class_start = (
-            datetime.combine(now.date(), start_time) - timedelta(minutes=10)
-        ).time()
+        pre_class_start = (datetime.combine(now.date(), start_time) - timedelta(minutes=10)).time()
         if pre_class_start <= now_time < start_time:
             return 120
 
@@ -271,9 +269,7 @@ class AdaptivePoller:
                     logger.warning("override lookup failed for meeting %s", schedule_id)
                     has_override = False
 
-            meeting_key: int | str = (
-                schedule_id if schedule_id is not None else item.course_code
-            )
+            meeting_key: int | str = schedule_id if schedule_id is not None else item.course_code
             last_level = self._last_levels.get(meeting_key)
 
             state = evaluate_notification_state(
@@ -319,9 +315,7 @@ class AdaptivePoller:
         except Exception:  # noqa: BLE001 - offline/test environment
             return _DEFAULT_IDLE_INTERVAL_SECONDS
 
-    async def _fetch_meeting_status(
-        self, item: ParsedScheduleItem
-    ) -> ParsedMeetingStatus | None:
+    async def _fetch_meeting_status(self, item: ParsedScheduleItem) -> ParsedMeetingStatus | None:
         """Return parsed attendance status for a schedule item.
 
         Parses the schedule HTML already fetched during this tick (stored on

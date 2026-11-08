@@ -15,6 +15,7 @@ from datetime import datetime, time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
 from app.services.poller import (
     AdaptivePoller,
     calculate_next_poll_interval,
@@ -37,51 +38,39 @@ def _dt(hour: int, minute: int = 0) -> datetime:
 def test_interval_during_active_class():
     now = _dt(8, 30)
     # Active lecture 08:00 - 09:40
-    interval = calculate_next_poll_interval(
-        now, active_lectures=[(time(8, 0), time(9, 40))]
-    )
+    interval = calculate_next_poll_interval(now, active_lectures=[(time(8, 0), time(9, 40))])
     assert interval == 60  # 60 seconds
 
 
 def test_interval_at_exact_start_is_active():
     now = _dt(8, 0)
-    interval = calculate_next_poll_interval(
-        now, active_lectures=[(time(8, 0), time(9, 40))]
-    )
+    interval = calculate_next_poll_interval(now, active_lectures=[(time(8, 0), time(9, 40))])
     assert interval == 60
 
 
 def test_interval_at_exact_end_is_active():
     now = _dt(9, 40)
-    interval = calculate_next_poll_interval(
-        now, active_lectures=[(time(8, 0), time(9, 40))]
-    )
+    interval = calculate_next_poll_interval(now, active_lectures=[(time(8, 0), time(9, 40))])
     assert interval == 60
 
 
 def test_interval_during_pre_class():
     now = _dt(7, 55)
     # Class starts in 5 minutes
-    interval = calculate_next_poll_interval(
-        now, active_lectures=[(time(8, 0), time(9, 40))]
-    )
+    interval = calculate_next_poll_interval(now, active_lectures=[(time(8, 0), time(9, 40))])
     assert interval == 120  # 120 seconds
 
 
 def test_interval_at_pre_class_boundary_is_pre_class():
     # start_time - 10m == 07:50 counts as pre-class observation.
     now = _dt(7, 50)
-    interval = calculate_next_poll_interval(
-        now, active_lectures=[(time(8, 0), time(9, 40))]
-    )
+    interval = calculate_next_poll_interval(now, active_lectures=[(time(8, 0), time(9, 40))])
     assert interval == 120
 
 
 def test_interval_just_outside_pre_class_is_idle():
     now = _dt(7, 49)
-    interval = calculate_next_poll_interval(
-        now, active_lectures=[(time(8, 0), time(9, 40))]
-    )
+    interval = calculate_next_poll_interval(now, active_lectures=[(time(8, 0), time(9, 40))])
     assert interval >= 3600
 
 
@@ -94,9 +83,7 @@ def test_interval_when_idle():
 
 def test_interval_idle_respects_configured_minimum():
     now = _dt(14, 0)
-    interval = calculate_next_poll_interval(
-        now, active_lectures=[], min_idle_interval_seconds=5000
-    )
+    interval = calculate_next_poll_interval(now, active_lectures=[], min_idle_interval_seconds=5000)
     assert interval >= 5000
 
 
@@ -164,12 +151,8 @@ async def test_poller_tick_parses_and_updates_database(poller_deps):
     ]
 
     with (
-        patch(
-            "app.services.poller.parse_daily_schedule", return_value=items
-        ) as mock_parse,
-        patch(
-            "app.services.poller.evaluate_notification_state", return_value=None
-        ) as mock_eval,
+        patch("app.services.poller.parse_daily_schedule", return_value=items) as mock_parse,
+        patch("app.services.poller.evaluate_notification_state", return_value=None) as mock_eval,
     ):
         poller = AdaptivePoller(
             client=deps["client"],
@@ -229,9 +212,7 @@ async def test_poller_tick_backoff_on_server_error(poller_deps):
     with (
         patch("app.services.poller.parse_daily_schedule", return_value=[]),
         patch("app.services.poller.evaluate_notification_state", return_value=None),
-        patch(
-            "app.services.poller.asyncio.sleep", new_callable=AsyncMock
-        ) as mock_sleep,
+        patch("app.services.poller.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
     ):
         poller = AdaptivePoller(
             client=deps["client"],
@@ -340,9 +321,7 @@ async def test_poller_exponential_backoff_escalation_and_reset(poller_deps):
     assert poller._current_backoff_seconds() == 300
 
     # Tick with successful fetch resets consecutive_failures to 0
-    deps["client"].fetch_today_schedule = AsyncMock(
-        return_value="<html>no courses</html>"
-    )
+    deps["client"].fetch_today_schedule = AsyncMock(return_value="<html>no courses</html>")
     with patch("app.services.poller.parse_daily_schedule", return_value=[]):
         await poller._tick()
 
