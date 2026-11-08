@@ -1,0 +1,81 @@
+/// A course meeting row matching the database `meetings` table.
+///
+/// Columns: id, meeting_number, meeting_date, simkuliah_status,
+/// local_override, is_presence_open, deadline_at.
+///
+/// Computed properties:
+///  - [effectiveStatus]: capitalized local override type ('Izin', 'Sakit',
+///    'Alpa') when a local override exists, otherwise capitalized
+///    `simkuliah_status` ('Hadir', 'Tidak Hadir', 'Pending').
+///  - [isOverridden]: true when [localOverride] is not null.
+class MeetingModel {
+  final int id;
+  final int meetingNumber;
+  final String meetingDate;
+  final String simkuliahStatus;
+  final Map<String, dynamic>? localOverride;
+  final bool isPresenceOpen;
+  final DateTime? deadlineAt;
+
+  const MeetingModel({
+    required this.id,
+    required this.meetingNumber,
+    required this.meetingDate,
+    required this.simkuliahStatus,
+    this.localOverride,
+    required this.isPresenceOpen,
+    this.deadlineAt,
+  });
+
+  factory MeetingModel.fromJson(Map<String, dynamic> json) {
+    return MeetingModel(
+      id: json['id'] as int,
+      meetingNumber: json['meeting_number'] as int,
+      meetingDate: json['meeting_date'] as String,
+      simkuliahStatus: json['simkuliah_status'] as String,
+      localOverride: json['local_override'] as Map<String, dynamic>?,
+      isPresenceOpen: json['is_presence_open'] as bool? ?? false,
+      deadlineAt: json['deadline_at'] == null
+          ? null
+          : DateTime.tryParse(json['deadline_at'] as String),
+    );
+  }
+
+  /// True when a local override is present for this meeting.
+  bool get isOverridden => localOverride != null;
+
+  /// Effective presence status for display.
+  ///
+  /// When a local override exists, returns the capitalized override type
+  /// ('Izin', 'Sakit', 'Alpa'). Otherwise returns the capitalized
+  /// `simkuliah_status` ('Hadir', 'Tidak Hadir', 'Pending').
+  String get effectiveStatus {
+    final overrideType = localOverride?['override_type'] as String?;
+    if (overrideType != null && overrideType.isNotEmpty) {
+      return _capitalize(overrideType);
+    }
+    return _capitalize(simkuliahStatus);
+  }
+
+  static String _capitalize(String value) {
+    return value
+        .split(' ')
+        .map((word) {
+          if (word.isEmpty) return word;
+          return word[0].toUpperCase() + word.substring(1);
+        })
+        .join(' ');
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'meeting_number': meetingNumber,
+      'meeting_date': meetingDate,
+      'simkuliah_status': simkuliahStatus,
+      'local_override': localOverride,
+      'is_presence_open': isPresenceOpen,
+      'deadline_at': deadlineAt?.toIso8601String(),
+    };
+  }
+}

@@ -1,0 +1,49 @@
+# Flutter/Dart
+.dart_tool/
+.build/
+.packages
+pubspec.lock
+build/
+
+# Android
+android/app/key.properties
+android/local.properties
+android/key.jks
+android/key.jks.kbx
+
+# iOS
+ios/*.xcodeproj/**
+ios/*.xcworkspace/**
+ios/Flutter/App.framework
+ios/Flutter/Flutter.podspec
+ios/Flutter/Generated.xcconfig
+ios/Flutter/app.flx
+ios/Flutter/app.zip
+ios/Flutter/Flutter/Flutter-Generated.xcconfig
+ios/Flutter/Flutter/app.flx
+ios/Flutter/Flutter/app.zip
+ios/Fluffle/
+ios/Flutter/Flutter/
+
+# Web
+web/manifest.json
+
+# Xcode
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+xcuserdata/
+*.xccheckout*
+*.moved-aside
+DerivedData/
+*.xcuserstate
+*.xcscmblueprint
+
+# Misc
+*.dart_tool
+.env

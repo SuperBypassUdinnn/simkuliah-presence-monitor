@@ -1,0 +1,19 @@
+name: simkuliah_client
+description: Multi-platform Flutter client for the Simkuliah presence monitor.
+publish_to: 'none'
+
+environment:
+  sdk: ">=3.13.0 <4.0.0"
+  flutter: ">=3.22.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  supabase_flutter: ^2.5.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
