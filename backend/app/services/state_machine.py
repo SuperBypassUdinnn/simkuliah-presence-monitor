@@ -1,20 +1,6 @@
-"""5-tier notification state machine for the Simkuliah presence monitor.
-
-Encodes the deterministic progression of notification levels for a course
-meeting, from the moment class starts until the presence window expires.
-
-Levels (in escalation order):
-
-* :data:`CLASS_STARTED`        - class has begun, presence not yet opened.
-* :data:`LECTURER_OPENED`      - lecturer has opened presence.
-* :data:`PENDING_REMINDER`     - presence deadline is approaching.
-* :data:`URGENT_CLOSING`       - presence window is about to close.
-* :data:`WINDOW_EXPIRED`       - presence window has closed.
-
-:func:`evaluate_notification_state` returns ``None`` (suppressed) when an
-active override is in force or the student is already present, and otherwise
-returns the highest applicable level, never regressing below the last notified
-level.
+"""Purpose: Deterministic 5-tier notification lifecycle state machine.
+Data & Logic Flow: Evaluates time and lecture status against thresholds to determine notification levels.
+Key Components: evaluate_notification_state, NotificationLevel
 """
 
 from __future__ import annotations

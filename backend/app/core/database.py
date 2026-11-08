@@ -1,10 +1,6 @@
-"""Supabase database repository for the Simkuliah presence monitor.
-
-Wraps the Supabase client with typed, async convenience methods for
-persisting schedules, meeting status, overrides, and incident logs.
-Reads :data:`SUPABASE_URL` and :data:`SUPABASE_SERVICE_ROLE_KEY` from
-the application settings only when a client is not injected, which keeps
-module import safe in offline/test environments.
+"""Purpose: Supabase PostgreSQL database repository wrapper.
+Data & Logic Flow: Manages persistence for course schedules, meeting logs, overrides, and incidents.
+Key Components: DatabaseRepository
 """
 
 from __future__ import annotations

@@ -1,15 +1,6 @@
-"""HMAC-SHA256 signed action tokens for ntfy webhook authentication.
-
-Tokens are short-lived, timestamp-bound signatures used to authorize direct
-action requests (presence confirmation, Izin, Sakit, Alpa) dispatched through
-ntfy.sh HTTP action buttons.
-
-Token format:
-    <base64url(json_envelope)>.<base64url(hmac_sha256)>
-
-The envelope carries the caller payload plus issued-at and expiration claims,
-so verification both authenticates the secret and enforces expiry without any
-server-side state.
+"""Purpose: Cryptographic token generation and verification for webhook actions.
+Data & Logic Flow: Signs payloads with HMAC-SHA256 and verifies incoming tokens with expiry checks.
+Key Components: create_action_token, verify_action_token
 """
 
 from __future__ import annotations

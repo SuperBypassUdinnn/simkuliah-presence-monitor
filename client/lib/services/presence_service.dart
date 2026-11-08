@@ -1,3 +1,6 @@
+/// Purpose: Client-side service coordinating Supabase real-time presence data.
+/// Data & Logic Flow: Streams active lecture meetings, executes presence confirmations and overrides.
+/// Key Components: PresenceService
 import 'dart:async';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -13,7 +16,7 @@ import '../models/schedule_model.dart';
 /// `DatabaseRepository` client-injection pattern.
 class PresenceService {
   PresenceService({SupabaseClient? client})
-      : _client = client ?? Supabase.instance.client;
+    : _client = client ?? Supabase.instance.client;
 
   final SupabaseClient _client;
 
@@ -32,7 +35,9 @@ class PresenceService {
   }
 
   /// Fetch today's meetings as a one-off future.
-  Future<List<MeetingModel>> fetchTodaysMeetings({required DateTime today}) async {
+  Future<List<MeetingModel>> fetchTodaysMeetings({
+    required DateTime today,
+  }) async {
     final start = DateTime(today.year, today.month, today.day);
     final response = await _client
         .from(_tableMeetings)
@@ -52,7 +57,9 @@ class PresenceService {
   }
 
   /// Fetch the meetings of one schedule, ordered by meeting number.
-  Future<List<MeetingModel>> fetchMeetingsForSchedule({required int scheduleId}) async {
+  Future<List<MeetingModel>> fetchMeetingsForSchedule({
+    required int scheduleId,
+  }) async {
     final response = await _client
         .from(_tableMeetings)
         .select()

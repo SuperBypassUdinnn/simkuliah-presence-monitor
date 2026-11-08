@@ -19,7 +19,11 @@ class ActiveLectureCard extends StatefulWidget {
   /// in widget tests).
   final PresenceService? presenceService;
 
-  const ActiveLectureCard({super.key, required this.meeting, this.presenceService});
+  const ActiveLectureCard({
+    super.key,
+    required this.meeting,
+    this.presenceService,
+  });
 
   @override
   State<ActiveLectureCard> createState() => _ActiveLectureCardState();
@@ -34,7 +38,10 @@ class _ActiveLectureCardState extends State<ActiveLectureCard> {
     if (service == null) return;
     setState(() => _submitting = true);
     try {
-      await service.submitPresence(meetingId: widget.meeting.id, isPresent: true);
+      await service.submitPresence(
+        meetingId: widget.meeting.id,
+        isPresent: true,
+      );
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

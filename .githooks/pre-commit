@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# pre-commit - Run automated quality verification before committing
+set -euo pipefail
+
+echo "[*] Running pre-commit verification pipeline..."
+if python3 scripts/verify_pipeline.py --fast; then
+    echo "[PASS] Pre-commit quality verification passed."
+    exit 0
+else
+    echo "[FAIL] Pre-commit verification failed! Fix issues or bypass with git commit --no-verify" >&2
+    exit 1
+fi

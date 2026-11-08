@@ -1,0 +1,13 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": ["AGENTS.md"],
+  "ignore": [
+    "**/node_modules/**",
+    "**/.git/**",
+    "**/.dart_tool/**",
+    "**/build/**",
+    "**/__pycache__/**",
+    "**/.venv/**",
+    "**/.planning/archive/**"
+  ]
+}

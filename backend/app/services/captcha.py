@@ -1,7 +1,6 @@
-"""Local ONNX CAPTCHA solver service for Simkuliah logins.
-
-Consumes raw image bytes (PNG/JPEG) from Simkuliah
-``/index.php/login/captcha_image`` and produces a cleaned 5-digit string.
+"""Purpose: Local CPU ONNX CAPTCHA recognition service using ddddocr.
+Data & Logic Flow: Receives raw image bytes, classifies digits, and normalizes output to 5 digits.
+Key Components: solve_captcha, clean_captcha_digits, get_ocr_engine
 """
 
 from __future__ import annotations

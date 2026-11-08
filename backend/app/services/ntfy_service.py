@@ -1,10 +1,6 @@
-"""ntfy.sh push dispatcher for the Simkuliah presence monitor.
-
-Dispatches 5-tier notification state changes to an ntfy topic as HTTP POST
-requests with signed action buttons ("Presensi Sekarang", "Izin", "Sakit").
-Each action button carries an ``X-Action-Token`` header signed with
-:func:`app.core.security.create_action_token`, so the webhook receiver (Task 7)
-can verify the action without server-side state.
+"""Purpose: Push notification dispatcher targeting ntfy.sh topics.
+Data & Logic Flow: Builds rich notification messages with HMAC-signed action buttons and dispatches via HTTP.
+Key Components: NtfyDispatcher, dispatch_ntfy_notification
 """
 
 from __future__ import annotations

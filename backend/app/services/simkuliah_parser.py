@@ -1,14 +1,6 @@
-"""HTML scraper and parser service for the Simkuliah presence monitor.
-
-Parses raw HTML from the Simkuliah CodeIgniter portal into typed Pydantic
-models:
-
-* :func:`parse_daily_schedule` - today's schedule table rows
-* :func:`parse_attendance_status` - presence open/closed status for a meeting
-
-Uses :mod:`selectolax` for fast, zero-dependency DOM parsing and regular
-expressions for timestamps and hidden form parameters. Every entry point is
-defensive: empty or malformed HTML returns sane defaults instead of raising.
+"""Purpose: High-performance DOM parsing for Simkuliah HTML pages.
+Data & Logic Flow: Parses daily schedule tables and real-time attendance alert indicators via Lexbor.
+Key Components: parse_daily_schedule, parse_attendance_status
 """
 
 from __future__ import annotations

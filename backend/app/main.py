@@ -1,7 +1,6 @@
-"""FastAPI application for the Simkuliah Presence Monitor API.
-
-Mounts the aggregated API router so all version-1 endpoints live at
-``/api/v1/...`` and starts the adaptive poller through the FastAPI lifespan.
+"""Purpose: FastAPI application entrypoint and background worker lifecycle.
+Data & Logic Flow: Initializes routers, registers lifespan event for poller, and mounts endpoints.
+Key Components: app, lifespan, poller
 """
 
 from __future__ import annotations

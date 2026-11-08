@@ -29,9 +29,7 @@ class _TodayFeedViewState extends State<TodayFeedView> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Kehadiran Hari Ini'),
-      ),
+      appBar: AppBar(title: const Text('Kehadiran Hari Ini')),
       body: FutureBuilder<List<MeetingModel>>(
         future: _service.fetchTodaysMeetings(today: DateTime.now()),
         builder: (context, snapshot) {
@@ -39,11 +37,15 @@ class _TodayFeedViewState extends State<TodayFeedView> {
             return const Center(child: CircularProgressIndicator());
           }
           if (snapshot.hasError) {
-            return Center(child: Text('Gagal memuat jadwal: ${snapshot.error}'));
+            return Center(
+              child: Text('Gagal memuat jadwal: ${snapshot.error}'),
+            );
           }
           final meetings = snapshot.data ?? const <MeetingModel>[];
           if (meetings.isEmpty) {
-            return const Center(child: Text('Tidak ada jadwal kuliah hari ini.'));
+            return const Center(
+              child: Text('Tidak ada jadwal kuliah hari ini.'),
+            );
           }
           return Column(
             children: [

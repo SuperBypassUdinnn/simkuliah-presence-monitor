@@ -1,9 +1,6 @@
-"""Unit tests for the 5-tier notification state machine.
-
-Covers all five notification levels (CLASS_STARTED, LECTURER_OPENED,
-PENDING_REMINDER, URGENT_CLOSING, WINDOW_EXPIRED), override suppression,
-student-present suppression, and the ntfy dispatch payload formatting with
-signed action buttons.
+"""Purpose: Unit tests for the 5-tier notification lifecycle state machine.
+Data & Logic Flow: Verifies state transitions across lecture start, open, deadline, and expiration.
+Key Components: test_state_1_class_started, test_state_2_lecturer_opened
 """
 
 from __future__ import annotations

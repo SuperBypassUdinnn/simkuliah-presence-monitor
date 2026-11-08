@@ -1,9 +1,6 @@
-"""Unit tests for the Supabase database repository and Pydantic schemas.
-
-Covers override-type validation (izin / sakit / alpa) plus mocked Supabase
-operations for upsert_schedules, record_meeting_status, save_override,
-get_active_override, and log_incident. All tests run offline against a
-MagicMock Supabase client so no network or real database is required.
+"""Purpose: Unit tests for Supabase database repository operations.
+Data & Logic Flow: Tests CRUD operations, retry wrappers, and override validation logic.
+Key Components: test_override_suppression_logic, DatabaseRepository
 """
 
 from __future__ import annotations

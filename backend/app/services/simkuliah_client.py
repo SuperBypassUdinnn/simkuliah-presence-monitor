@@ -1,17 +1,6 @@
-"""Simkuliah async HTTP client with persistent cookie-based session management.
-
-Wraps ``httpx.AsyncClient`` so the ``ci_session`` CodeIgniter session cookie is
-persisted across requests. Provides login with CAPTCHA retry, a keep-alive
-heartbeat, schedule/semester matrix fetching, and presence confirmation.
-
-Endpoints (reverse-engineered from the USK Simkuliah CodeIgniter portal):
-
-* ``POST /index.php/login/auth``              - login (username, password, captcha_answer)
-* ``GET  /index.php/login/captcha_image``     - CAPTCHA image challenge
-* ``GET  /index.php/mahasiswa/dashboard``     - dashboard (keep-alive target)
-* ``GET  /index.php/mahasiswa/jadwal_hari_ini`` - today's schedule HTML
-* ``GET  /index.php/mahasiswa/matriks_semester``- semester presence matrix HTML
-* ``POST /index.php/mahasiswa/presensi/simpan_presensi`` - presence confirmation
+"""Purpose: Asynchronous HTTP client for Simkuliah portal interaction.
+Data & Logic Flow: Handles session authentication, cookie persistence, scraping, and presence actions.
+Key Components: SimkuliahClient
 """
 
 from __future__ import annotations

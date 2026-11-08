@@ -1,13 +1,6 @@
-/// A course meeting row matching the database `meetings` table.
-///
-/// Columns: id, meeting_number, meeting_date, simkuliah_status,
-/// local_override, is_presence_open, deadline_at.
-///
-/// Computed properties:
-///  - [effectiveStatus]: capitalized local override type ('Izin', 'Sakit',
-///    'Alpa') when a local override exists, otherwise capitalized
-///    `simkuliah_status` ('Hadir', 'Tidak Hadir', 'Pending').
-///  - [isOverridden]: true when [localOverride] is not null.
+/// Purpose: Course meeting data model matching database schema.
+/// Data & Logic Flow: Deserializes meeting records and computes presence status with overrides.
+/// Key Components: MeetingModel
 class MeetingModel {
   final int id;
   final String courseName;

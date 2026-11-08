@@ -1,3 +1,8 @@
+"""Purpose: Unit tests for local ONNX CAPTCHA solver service.
+Data & Logic Flow: Tests digit cleaning, confusable normalization, and model delegation.
+Key Components: test_clean_captcha_digits, test_solve_captcha_delegation
+"""
+
 from unittest.mock import MagicMock, patch
 
 from app.services.captcha import clean_captcha_digits, solve_captcha

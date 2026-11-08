@@ -1,12 +1,6 @@
-"""Application configuration backed by Pydantic Settings.
-
-Consumes environment variables:
-    SIMKULIAH_NPM, SIMKULIAH_PASSWORD, NTFY_TOPIC, ACTION_SECRET_KEY,
-    SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
-
-Optional overrides with sensible defaults:
-    NTFY_BASE_URL, POLL_ACTIVE_INTERVAL_SECONDS,
-    POLL_PRE_CLASS_INTERVAL_SECONDS, POLL_IDLE_INTERVAL_SECONDS
+"""Purpose: Centralized application configuration and environment settings.
+Data & Logic Flow: Validates environment variables into strongly-typed Pydantic settings.
+Key Components: Settings, settings
 """
 
 from __future__ import annotations

@@ -1,9 +1,6 @@
-"""Unit tests for the Simkuliah HTML scraper and parser service.
-
-Covers daily schedule parsing (course code, name, room, time range, lecturer)
-and attendance status parsing (open / closed / not yet opened by lecturer),
-plus graceful handling of empty or malformed HTML. All tests run offline
-against static CodeIgniter HTML fixtures.
+"""Purpose: Unit tests for Simkuliah schedule and attendance HTML scrapers.
+Data & Logic Flow: Tests DOM extraction of daily schedules, presence alert boxes, and error handling.
+Key Components: test_parse_daily_schedule, test_parse_attendance_status_open
 """
 
 from __future__ import annotations

@@ -27,7 +27,11 @@ class SemesterMatrixView extends StatefulWidget {
   /// [`PresenceService`] when omitted.
   final PresenceService? presenceService;
 
-  const SemesterMatrixView({super.key, this.testMode = false, this.presenceService});
+  const SemesterMatrixView({
+    super.key,
+    this.testMode = false,
+    this.presenceService,
+  });
 
   @override
   State<SemesterMatrixView> createState() => _SemesterMatrixViewState();
@@ -61,12 +65,22 @@ class _SemesterMatrixViewState extends State<SemesterMatrixView> {
   /// exercised.
   List<MeetingModel> _mockMeetings(String courseName) {
     final statuses = <String>[
-      'hadir', 'hadir', 'hadir', 'hadir',
-      'izin', 'izin',
+      'hadir',
+      'hadir',
+      'hadir',
+      'hadir',
+      'izin',
+      'izin',
       'sakit',
       'alpa',
-      'pending', 'pending', 'pending', 'pending',
-      'hadir', 'pending', 'izin', 'sakit',
+      'pending',
+      'pending',
+      'pending',
+      'pending',
+      'hadir',
+      'pending',
+      'izin',
+      'sakit',
     ];
     return List.generate(_meetingsPerCourse, (index) {
       final number = index + 1;
@@ -84,7 +98,9 @@ class _SemesterMatrixViewState extends State<SemesterMatrixView> {
   /// Fraction of meetings with status Hadir, clamped to 0.0-1.0.
   double _attendancePercentage(List<MeetingModel> meetings) {
     if (meetings.isEmpty) return 0.0;
-    final hadir = meetings.where((m) => m.effectiveStatus.toLowerCase() == 'hadir').length;
+    final hadir = meetings
+        .where((m) => m.effectiveStatus.toLowerCase() == 'hadir')
+        .length;
     return (hadir / meetings.length).clamp(0.0, 1.0);
   }
 
@@ -118,7 +134,11 @@ class _SemesterMatrixViewState extends State<SemesterMatrixView> {
               top: -18,
               child: const Text(
                 '75% target',
-                style: TextStyle(fontSize: 10, color: Colors.red, fontWeight: FontWeight.w600),
+                style: TextStyle(
+                  fontSize: 10,
+                  color: Colors.red,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
           ],
@@ -162,19 +182,22 @@ class _SemesterMatrixViewState extends State<SemesterMatrixView> {
   }
 
   /// One course section: name, attendance bar, and meeting grid.
-  Widget _courseSection(BuildContext context, String courseName, List<MeetingModel> meetings) {
+  Widget _courseSection(
+    BuildContext context,
+    String courseName,
+    List<MeetingModel> meetings,
+  ) {
     final percentage = _attendancePercentage(meetings);
-    final hadir = meetings.where((m) => m.effectiveStatus.toLowerCase() == 'hadir').length;
+    final hadir = meetings
+        .where((m) => m.effectiveStatus.toLowerCase() == 'hadir')
+        .length;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              courseName,
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
+            Text(courseName, style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 8),
             Row(
               children: [
@@ -192,10 +215,7 @@ class _SemesterMatrixViewState extends State<SemesterMatrixView> {
             const SizedBox(height: 6),
             _attendanceBar(context, percentage),
             const SizedBox(height: 12),
-            Text(
-              'Pertemuan',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
+            Text('Pertemuan', style: Theme.of(context).textTheme.bodySmall),
             const SizedBox(height: 8),
             _meetingGrid(meetings),
           ],
@@ -210,9 +230,7 @@ class _SemesterMatrixViewState extends State<SemesterMatrixView> {
     // unavailable in widget tests.
     if (widget.testMode) {
       return Scaffold(
-        appBar: AppBar(
-          title: const Text('Matriks Semester'),
-        ),
+        appBar: AppBar(title: const Text('Matriks Semester')),
         body: SingleChildScrollView(
           padding: const EdgeInsets.all(12),
           child: _courseSection(
@@ -227,9 +245,7 @@ class _SemesterMatrixViewState extends State<SemesterMatrixView> {
     // Live mode: courses are fetched once via the memoized [_matrixFuture],
     // so rebuilds do not re-trigger the network request.
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Matriks Semester'),
-      ),
+      appBar: AppBar(title: const Text('Matriks Semester')),
       body: FutureBuilder<List<ScheduleModel>>(
         future: _matrixFuture,
         builder: (context, snapshot) {
@@ -262,7 +278,11 @@ class _SemesterMatrixViewState extends State<SemesterMatrixView> {
   }
 
   /// Course section for live mode that fetches the meetings of one schedule.
-  Widget _courseSectionFuture(BuildContext context, PresenceService service, ScheduleModel schedule) {
+  Widget _courseSectionFuture(
+    BuildContext context,
+    PresenceService service,
+    ScheduleModel schedule,
+  ) {
     return FutureBuilder<List<MeetingModel>>(
       future: service.fetchMeetingsForSchedule(scheduleId: schedule.id),
       builder: (context, snapshot) {
@@ -288,7 +308,9 @@ class _SemesterMatrixViewState extends State<SemesterMatrixView> {
           return Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
-              child: Text('Gagal memuat pertemuan untuk ${schedule.courseName}: ${snapshot.error}'),
+              child: Text(
+                'Gagal memuat pertemuan untuk ${schedule.courseName}: ${snapshot.error}',
+              ),
             ),
           );
         }

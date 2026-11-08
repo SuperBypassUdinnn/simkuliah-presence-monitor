@@ -1,12 +1,6 @@
-"""Adaptive poller engine for the Simkuliah presence monitor.
-
-Runs a background polling loop (via APScheduler ``AsyncIOScheduler``) that
-checks the Simkuliah portal for today's schedule, parses it, persists it to
-the database repository, evaluates the notification state machine, and
-dispatches ntfy notifications. The poll interval adapts to the current lecture
-state: active lectures are polled every 60s, pre-class observation every 120s,
-and idle periods every 7200s. On server errors the poller backs off
-exponentially (30s up to a 300s cap), resetting on success.
+"""Purpose: Adaptive poller engine coordinating schedule-aware polling and notifications.
+Data & Logic Flow: Periodically polls Simkuliah, parses schedule, evaluates state machine, and triggers ntfy alerts.
+Key Components: AdaptivePoller, calculate_next_poll_interval
 """
 
 from __future__ import annotations

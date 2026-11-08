@@ -1,8 +1,6 @@
-"""Unit tests for the Simkuliah async HTTP client and session authenticator.
-
-Covers the login flow with CAPTCHA retry, keep-alive heartbeat, schedule /
-semester matrix fetching, presence confirmation, and HTTP 500/502/504 error
-handling. All external HTTP is mocked so tests run offline and deterministic.
+"""Purpose: Unit tests for Simkuliah asynchronous HTTP client and session management.
+Data & Logic Flow: Tests login flow, CAPTCHA retries, keep-alive heartbeats, and error responses.
+Key Components: test_login_success, test_login_captcha_retry
 """
 
 from __future__ import annotations

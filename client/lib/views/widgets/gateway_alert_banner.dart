@@ -32,10 +32,7 @@ class GatewayAlertBanner extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          const Icon(
-            Icons.warning_amber_rounded,
-            color: Colors.black87,
-          ),
+          const Icon(Icons.warning_amber_rounded, color: Colors.black87),
           const SizedBox(width: 12),
           Expanded(
             child: Text(

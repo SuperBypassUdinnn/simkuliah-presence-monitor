@@ -8,7 +8,7 @@ void main() {
       'meeting_number': 7,
       'meeting_date': '2026-11-09',
       'simkuliah_status': 'pending',
-      'local_override': {'override_type': 'izin'}
+      'local_override': {'override_type': 'izin'},
     };
     final meeting = MeetingModel.fromJson(json);
     expect(meeting.effectiveStatus, 'Izin');

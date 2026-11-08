@@ -1,3 +1,8 @@
+"""Purpose: Unit tests for HMAC action token generation and verification.
+Data & Logic Flow: Exercises token creation, signature verification, and expiration handling.
+Key Components: test_token_creation_and_verification, test_token_expiration
+"""
+
 from app.core.security import create_action_token, verify_action_token
 
 

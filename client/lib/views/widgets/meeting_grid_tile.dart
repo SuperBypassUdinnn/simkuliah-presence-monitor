@@ -3,13 +3,7 @@ import 'package:flutter/material.dart';
 import '../../models/meeting_model.dart';
 
 /// Statuses used to color a meeting indicator in the semester matrix.
-enum _MeetingIndicatorStatus {
-  hadir,
-  izin,
-  sakit,
-  alpa,
-  pending,
-}
+enum _MeetingIndicatorStatus { hadir, izin, sakit, alpa, pending }
 
 /// A single cell in the semester matrix grid.
 ///
@@ -93,8 +87,7 @@ class MeetingGridTile extends StatelessWidget {
         width: 72,
         decoration: BoxDecoration(
           color: Theme.of(context).cardColor,
-          border:
-              pending ? Border.all(color: Colors.grey, width: 1.5) : null,
+          border: pending ? Border.all(color: Colors.grey, width: 1.5) : null,
           borderRadius: BorderRadius.circular(12),
         ),
         child: Column(
