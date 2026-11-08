@@ -119,9 +119,7 @@ def evaluate_notification_state(
         candidate: NotificationLevel = NotificationLevel.WINDOW_EXPIRED
     elif now >= end_dt - _minutes(_URGENT_WINDOW_MINUTES):
         candidate = NotificationLevel.URGENT_CLOSING
-    elif deadline_at is not None and now >= deadline_at - _minutes(
-        _PENDING_WINDOW_MINUTES
-    ):
+    elif deadline_at is not None and now >= deadline_at - _minutes(_PENDING_WINDOW_MINUTES):
         candidate = NotificationLevel.PENDING_REMINDER
     elif is_dosen_open:
         candidate = NotificationLevel.LECTURER_OPENED

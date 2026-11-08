@@ -131,9 +131,7 @@ class NtfyDispatcher:
 
         return title, message, actions
 
-    def _message_text(
-        self, state: NotificationLevel, course: str, room: str, lecturer: str
-    ) -> str:
+    def _message_text(self, state: NotificationLevel, course: str, room: str, lecturer: str) -> str:
         where = f" ({room})" if room else ""
         who = f" - {lecturer}" if lecturer else ""
         base = f"{course}{where}{who}"

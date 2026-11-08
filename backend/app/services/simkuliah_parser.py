@@ -11,9 +11,7 @@ from pydantic import BaseModel
 from selectolax.lexbor import LexborHTMLParser as HTMLParser
 
 _TIME_RANGE_RE = re.compile(r"(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})")
-_DEADLINE_RE = re.compile(
-    r"batas waktu presensi:\s*(\d{1,2}:\d{2}:\d{2})", re.IGNORECASE
-)
+_DEADLINE_RE = re.compile(r"batas waktu presensi:\s*(\d{1,2}:\d{2}:\d{2})", re.IGNORECASE)
 _OPEN_MARKERS = ("membuka presensi", "presensi telah dibuka")
 
 

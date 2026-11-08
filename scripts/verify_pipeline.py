@@ -36,39 +36,27 @@ def run_check(cmd: list[str], cwd: Path | None = None, name: str = "") -> bool:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Automated quality verification pipeline."
-    )
+    parser = argparse.ArgumentParser(description="Automated quality verification pipeline.")
     parser.add_argument(
         "--fast", action="store_true", help="Fast iteration mode (skips heavy suites)"
     )
-    parser.add_argument(
-        "--skip-vuln", action="store_true", help="Skip vulnerability scanning"
-    )
+    parser.add_argument("--skip-vuln", action="store_true", help="Skip vulnerability scanning")
     args = parser.parse_args()
     fast_mode = args.fast
 
     # Python checks
     venv_pytest = Path("backend/.venv/bin/pytest")
     pytest_bin = (
-        str(venv_pytest.resolve())
-        if venv_pytest.exists()
-        else (shutil.which("pytest") or "pytest")
+        str(venv_pytest.resolve()) if venv_pytest.exists() else (shutil.which("pytest") or "pytest")
     )
 
     if shutil.which("ruff"):
         run_check(["ruff", "check", "backend", "scripts"], name="ruff check")
-        run_check(
-            ["ruff", "format", "--check", "backend", "scripts"], name="ruff format"
-        )
+        run_check(["ruff", "format", "--check", "backend", "scripts"], name="ruff format")
     if (venv_pytest.exists() or shutil.which("pytest")) and any(
         Path("backend").glob("**/test_*.py")
     ):
-        pytest_cmd = (
-            [pytest_bin, "-q"]
-            if not fast_mode
-            else [pytest_bin, "-q", "-m", "not slow"]
-        )
+        pytest_cmd = [pytest_bin, "-q"] if not fast_mode else [pytest_bin, "-q", "-m", "not slow"]
         run_check(pytest_cmd, cwd=Path("backend"), name="pytest (backend)")
 
     # Flutter checks
@@ -78,9 +66,7 @@ def main() -> int:
         pkg_config = workdir / ".dart_tool" / "package_config.json"
         if not pkg_config.exists() and shutil.which("flutter"):
             print(f"[*] Resolving dependencies for {workdir}...")
-            subprocess.run(
-                ["flutter", "pub", "get"], check=False, cwd=workdir, capture_output=True
-            )
+            subprocess.run(["flutter", "pub", "get"], check=False, cwd=workdir, capture_output=True)
         if shutil.which("flutter") and pkg_config.exists():
             run_check(
                 ["flutter", "analyze", "--no-pub"],

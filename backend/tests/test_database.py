@@ -8,6 +8,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+
 from app.core.database import DatabaseRepository
 from app.models.schemas import OverrideType
 from app.services.simkuliah_parser import ParsedMeetingStatus, ParsedScheduleItem
@@ -73,9 +74,7 @@ async def test_record_meeting_status_calls_client():
 @pytest.mark.asyncio
 async def test_save_override_calls_client_with_payload():
     repo = DatabaseRepository(client=MagicMock())
-    await repo.save_override(
-        meeting_id=1042, override_type="izin", note="family matter"
-    )
+    await repo.save_override(meeting_id=1042, override_type="izin", note="family matter")
 
     repo.client.table.assert_called_with("overrides")
     repo.client.table().upsert.assert_called_once()
@@ -98,9 +97,7 @@ async def test_save_override_rejects_invalid_type():
 @pytest.mark.asyncio
 async def test_get_active_override_returns_type():
     repo = DatabaseRepository(client=MagicMock())
-    repo.client.table().select().eq().eq().execute.return_value.data = [
-        {"override_type": "sakit"}
-    ]
+    repo.client.table().select().eq().eq().execute.return_value.data = [{"override_type": "sakit"}]
     result = await repo.get_active_override(meeting_id=1042)
     assert result == "sakit"
 
@@ -116,9 +113,7 @@ async def test_get_active_override_returns_none_when_empty():
 @pytest.mark.asyncio
 async def test_log_incident_calls_client_with_payload():
     repo = DatabaseRepository(client=MagicMock())
-    await repo.log_incident(
-        incident_type="timeout", status_code=504, snippet="gateway timeout"
-    )
+    await repo.log_incident(incident_type="timeout", status_code=504, snippet="gateway timeout")
 
     repo.client.table.assert_called_with("incidents")
     repo.client.table().insert.assert_called_once()

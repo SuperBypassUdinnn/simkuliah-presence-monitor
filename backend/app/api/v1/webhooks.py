@@ -112,23 +112,15 @@ async def webhook_action(
             raise HTTPException(status_code=502, detail="Presence confirmation failed")
 
     elif action in ("mark_override", "set_override"):
-        override_type = (body.override_type if body else None) or payload.get(
-            "override_type"
-        )
+        override_type = (body.override_type if body else None) or payload.get("override_type")
         meeting_id = (body.meeting_id if body else None) or payload.get("meeting_id")
         if override_type not in _VALID_OVERRIDE_TYPES:
-            raise HTTPException(
-                status_code=400, detail=f"Invalid override type: {override_type!r}"
-            )
+            raise HTTPException(status_code=400, detail=f"Invalid override type: {override_type!r}")
         if meeting_id is None:
-            raise HTTPException(
-                status_code=400, detail="mark_override requires meeting_id"
-            )
+            raise HTTPException(status_code=400, detail="mark_override requires meeting_id")
         note = (body.note if body else "") or payload.get("note", "")
         repo = _get_db()
-        await repo.save_override(
-            meeting_id=meeting_id, override_type=override_type, note=note
-        )
+        await repo.save_override(meeting_id=meeting_id, override_type=override_type, note=note)
 
     # Mark the token as processed only after the action succeeds.
     _processed_tokens.add(x_action_token)

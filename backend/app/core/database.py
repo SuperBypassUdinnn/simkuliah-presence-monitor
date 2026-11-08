@@ -118,9 +118,7 @@ class DatabaseRepository:
     # ------------------------------------------------------------------ #
     # Overrides
     # ------------------------------------------------------------------ #
-    async def save_override(
-        self, meeting_id: int, override_type: str, note: str = ""
-    ) -> None:
+    async def save_override(self, meeting_id: int, override_type: str, note: str = "") -> None:
         """Save an override for a meeting, rejecting unknown override types."""
         self._require_valid_override(override_type)
 
@@ -154,9 +152,7 @@ class DatabaseRepository:
     # ------------------------------------------------------------------ #
     # Incidents
     # ------------------------------------------------------------------ #
-    async def log_incident(
-        self, incident_type: str, status_code: int, snippet: str
-    ) -> None:
+    async def log_incident(self, incident_type: str, status_code: int, snippet: str) -> None:
         """Log an incident into the ``incidents`` table."""
 
         def operation() -> None:
