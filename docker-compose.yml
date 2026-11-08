@@ -9,7 +9,7 @@ services:
     env_file:
       - .env
     environment:
-      # Override these values via .env. SIMKULIAH_API_BASE_URL is a placeholder
-      # pointing at the local backend; point it at the gateway URL in production.
+      # Override these values via .env. SIMKULIAH_API_BASE_URL points at the
+      # gateway URL; defaults to the local backend when unset.
       - SIMKULIAH_API_BASE_URL=${SIMKULIAH_API_BASE_URL:-http://localhost:8000}
     restart: unless-stopped
