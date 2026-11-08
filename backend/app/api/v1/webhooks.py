@@ -63,9 +63,11 @@ class ActionRequest(BaseModel):
 
 
 @router.post("/action")
+@router.post("/ntfy/{action}")
 async def webhook_action(
     x_action_token: str | None = Header(default=None, alias="X-Action-Token"),
     body: ActionRequest | None = None,
+    action: str | None = None,
 ) -> dict[str, str]:
     """Confirm presence or record an override for a course meeting.
 

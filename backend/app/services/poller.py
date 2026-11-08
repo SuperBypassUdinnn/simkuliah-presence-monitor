@@ -342,7 +342,7 @@ class AdaptivePoller:
                 html = await self.client.fetch_today_schedule()
             except Exception:  # noqa: BLE001 - never crash a tick
                 return None
-        if not html:
+        if not html or "alert" not in html.lower():
             return None
         try:
             return parse_attendance_status(html)

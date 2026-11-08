@@ -161,7 +161,7 @@ class NtfyDispatcher:
 
     def _action_url(self, action: str) -> str:
         # Webhook endpoint (Task 7) that verifies the signed token and acts.
-        return f"{self.base_url.rstrip('/')}/webhook/ntfy/{action}"
+        return f"{self.base_url.rstrip('/')}/api/v1/webhook/action"
 
     def _sign(self, payload: dict[str, Any]) -> str:
         return create_action_token(
