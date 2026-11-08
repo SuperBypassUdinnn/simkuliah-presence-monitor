@@ -22,7 +22,7 @@ from app.services.simkuliah_client import SimkuliahClient
 
 router = APIRouter(prefix="/webhook")
 
-_VALID_ACTIONS = {"confirm_presence", "mark_override"}
+_VALID_ACTIONS = {"confirm_presence", "mark_override", "set_override"}
 _VALID_OVERRIDE_TYPES = {"izin", "sakit", "alpa"}
 
 # In-memory idempotency store: action tokens already processed. Re-processing
@@ -109,7 +109,7 @@ async def webhook_action(
         if not ok:
             raise HTTPException(status_code=502, detail="Presence confirmation failed")
 
-    elif action == "mark_override":
+    elif action in ("mark_override", "set_override"):
         override_type = (body.override_type if body else None) or payload.get(
             "override_type"
         )

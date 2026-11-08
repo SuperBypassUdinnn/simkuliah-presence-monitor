@@ -21,7 +21,13 @@ from app.services.state_machine import NotificationLevel
 # ntfy defaults, overridable through environment variables.
 DEFAULT_BASE_URL = os.environ.get("NTFY_BASE_URL", "https://ntfy.sh")
 DEFAULT_TOPIC = os.environ.get("NTFY_TOPIC", "simkuliah-presence")
-DEFAULT_SECRET = os.environ.get("NTFY_ACTION_SECRET", "change-me-in-production")
+
+try:
+    from app.config import settings
+
+    DEFAULT_SECRET = settings.ACTION_SECRET_KEY
+except Exception:  # noqa: BLE001 - offline/test environment lacks settings
+    DEFAULT_SECRET = os.environ.get("NTFY_ACTION_SECRET", "change-me-in-production")
 
 # Lifetime of a signed action token (15 minutes).
 _ACTION_TOKEN_TTL_SECONDS = 900
@@ -116,13 +122,13 @@ class NtfyDispatcher:
         # "Izin" and "Sakit" overrides.
         for label, override_type in (("Izin", "izin"), ("Sakit", "sakit")):
             override_payload = dict(
-                base_payload, action="set_override", override_type=override_type
+                base_payload, action="mark_override", override_type=override_type
             )
             actions.append(
                 {
                     "label": label,
                     "type": "http",
-                    "target": self._action_url("set_override"),
+                    "target": self._action_url("mark_override"),
                     "token": self._sign(override_payload),
                 }
             )

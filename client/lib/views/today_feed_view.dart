@@ -7,8 +7,24 @@ import 'widgets/gateway_alert_banner.dart';
 
 /// Today's feed: renders the list of today's lecture meetings from
 /// [`PresenceService`], each as an [`ActiveLectureCard`].
-class TodayFeedView extends StatelessWidget {
-  const TodayFeedView({super.key});
+class TodayFeedView extends StatefulWidget {
+  /// Optional injectable presence service (defaults to a new instance).
+  final PresenceService? presenceService;
+
+  const TodayFeedView({super.key, this.presenceService});
+
+  @override
+  State<TodayFeedView> createState() => _TodayFeedViewState();
+}
+
+class _TodayFeedViewState extends State<TodayFeedView> {
+  late final PresenceService _service;
+
+  @override
+  void initState() {
+    super.initState();
+    _service = widget.presenceService ?? PresenceService();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -17,7 +33,7 @@ class TodayFeedView extends StatelessWidget {
         title: const Text('Kehadiran Hari Ini'),
       ),
       body: FutureBuilder<List<MeetingModel>>(
-        future: PresenceService().fetchTodaysMeetings(today: DateTime.now()),
+        future: _service.fetchTodaysMeetings(today: DateTime.now()),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());

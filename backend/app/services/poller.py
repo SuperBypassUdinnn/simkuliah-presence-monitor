@@ -25,6 +25,7 @@ from app.services.simkuliah_client import SimkuliahClient
 from app.services.simkuliah_parser import (
     ParsedMeetingStatus,
     ParsedScheduleItem,
+    parse_attendance_status,
     parse_daily_schedule,
 )
 from app.services.state_machine import (
@@ -206,6 +207,9 @@ class AdaptivePoller:
 
         # Successful fetch: reset backoff state.
         self.consecutive_failures = 0
+        # Keep the fetched HTML so per-meeting status can be parsed without
+        # refetching (which would double-count the schedule fetch).
+        self._last_schedule_html = html
 
         # Parse and persist the schedule.
         items: list[ParsedScheduleItem] = parse_daily_schedule(html)
@@ -326,8 +330,21 @@ class AdaptivePoller:
     ) -> ParsedMeetingStatus | None:
         """Return parsed attendance status for a schedule item.
 
-        Attempts to parse per-meeting presence HTML. Returns ``None`` when no
-        status could be determined. Integrations may override to fetch real
-        per-meeting HTML and run it through :func:`parse_attendance_status`.
+        Parses the schedule HTML already fetched during this tick (stored on
+        the instance) through :func:`parse_attendance_status` to extract
+        ``is_open``, ``deadline_time``, ``meeting_number``, and ``schedule_id``.
+        Falls back to a fresh schedule fetch only when no HTML was cached.
+        Returns ``None`` when no status could be determined.
         """
-        return None
+        html = getattr(self, "_last_schedule_html", "") or ""
+        if not html:
+            try:
+                html = await self.client.fetch_today_schedule()
+            except Exception:  # noqa: BLE001 - never crash a tick
+                return None
+        if not html:
+            return None
+        try:
+            return parse_attendance_status(html)
+        except Exception:  # noqa: BLE001 - parse failure is non-fatal
+            return None

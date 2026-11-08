@@ -9,6 +9,7 @@ module import safe in offline/test environments.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -75,7 +76,7 @@ class DatabaseRepository:
         last_error: Exception | None = None
         for attempt in range(1, _MAX_RETRIES + 1):
             try:
-                return operation()
+                return await asyncio.to_thread(operation)
             except Exception as exc:  # noqa: BLE001 - retry any DB error
                 last_error = exc
                 logger.warning(
