@@ -1,0 +1,15 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: simkuliah-backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      # Override these values via .env. SIMKULIAH_API_BASE_URL is a placeholder
+      # pointing at the local backend; point it at the gateway URL in production.
+      - SIMKULIAH_API_BASE_URL=${SIMKULIAH_API_BASE_URL:-http://localhost:8000}
+    restart: unless-stopped
