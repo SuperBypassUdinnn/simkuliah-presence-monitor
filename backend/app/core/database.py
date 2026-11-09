@@ -12,7 +12,7 @@ from typing import Any
 
 from supabase import create_client
 
-from app.models.schemas import MeetingRecord, OverrideType
+from app.models.schemas import OverrideType
 from app.services.simkuliah_parser import ParsedMeetingStatus, ParsedScheduleItem
 
 logger = logging.getLogger(__name__)
@@ -120,20 +120,71 @@ class DatabaseRepository:
     # ------------------------------------------------------------------ #
     # Meeting status
     # ------------------------------------------------------------------ #
-    async def record_meeting_status(self, status: ParsedMeetingStatus) -> None:
-        """Record a parsed meeting attendance status into ``meetings``."""
+    async def record_meeting_status(
+        self,
+        status: ParsedMeetingStatus,
+        *,
+        now: datetime | None = None,
+    ) -> None:
+        """Upsert one meeting's live attendance status into ``meetings``.
+
+        Only provided fields are written: PostgREST upserts leave missing
+        columns untouched, so a closed session never clears an earlier
+        ``lecturer_opened_at``. Requires both ``schedule_id`` and
+        ``meeting_number`` — without them the target row is ambiguous and the
+        call is skipped.
+        """
+        if status.schedule_id is None or status.meeting_number is None:
+            return
+
+        # Naive wall-clock "now" (local machine = Simkuliah's WIB). Attaching
+        # the machine's offset keeps the stored instant unambiguous while the
+        # wall time matches what Simkuliah's "Batas Absen" expresses.
+        moment = (now or datetime.now()).astimezone()
+        payload: dict[str, Any] = {
+            "schedule_id": status.schedule_id,
+            "meeting_number": status.meeting_number,
+            "last_polled_at": moment.isoformat(),
+        }
+        if status.deadline_time:
+            try:
+                hh, mm, ss = (status.deadline_time.split(":") + ["0", "0"])[:3]
+                payload["deadline_at"] = moment.replace(
+                    hour=int(hh), minute=int(mm), second=int(ss), microsecond=0
+                ).isoformat()
+            except ValueError:
+                logger.warning("unparsable deadline_time %r", status.deadline_time)
+        if status.is_open:
+            payload["lecturer_opened_at"] = moment.isoformat()
+        if status.is_student_present:
+            payload["simkuliah_status"] = "hadir"
 
         def operation() -> None:
-            payload = MeetingRecord(
-                meeting_id=status.schedule_id or 0,
-                schedule_id=status.schedule_id,
-                meeting_number=status.meeting_number,
-                is_open=status.is_open,
-                deadline_time=status.deadline_time,
-            )
-            self.client.table(_TABLE_MEETINGS).insert(payload.model_dump()).execute()
+            self.client.table(_TABLE_MEETINGS).upsert(
+                payload,
+                on_conflict="schedule_id,meeting_number",
+            ).execute()
 
         await self._with_retry(operation, "record_meeting_status")
+
+    async def upsert_meetings(self, records: list[dict[str, Any]]) -> None:
+        """Bulk-upsert parsed meeting rows on ``(schedule_id, meeting_number)``.
+
+        Each record carries ``schedule_id``, ``meeting_number``,
+        ``meeting_date``, ``lecturer_name`` and ``simkuliah_status`` taken
+        from the today-page matrix, whose column order matches Simkuliah's
+        official meeting numbering.
+        """
+        if not records:
+            return
+
+        def operation() -> None:
+            self.client.table(_TABLE_MEETINGS).upsert(
+                records,
+                on_conflict="schedule_id,meeting_number",
+            ).execute()
+
+        await self._with_retry(operation, "upsert_meetings")
 
     # ------------------------------------------------------------------ #
     # Overrides
@@ -193,6 +244,23 @@ class DatabaseRepository:
             return data[0].get("id") if data else None
 
         return await self._with_retry(operation, "resolve_meeting_id")
+
+    async def resolve_schedule_id(self, course_code: str, class_group: str = "A") -> int | None:
+        """Return the schedules-table id for a course code + class group."""
+
+        def operation() -> Any:
+            response = (
+                self.client.table(_TABLE_SCHEDULES)
+                .select("id")
+                .eq("course_code", course_code)
+                .eq("class_group", class_group)
+                .limit(1)
+                .execute()
+            )
+            data = response.data or []
+            return data[0].get("id") if data else None
+
+        return await self._with_retry(operation, "resolve_schedule_id")
 
     # ------------------------------------------------------------------ #
     # Incidents

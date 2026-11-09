@@ -19,8 +19,9 @@ from app.services.simkuliah_client import SimkuliahClient
 from app.services.simkuliah_parser import (
     ParsedMeetingStatus,
     ParsedScheduleItem,
-    parse_attendance_status,
+    parse_attendance_cards,
     parse_daily_schedule,
+    parse_meeting_matrix,
 )
 from app.services.state_machine import (
     NotificationLevel,
@@ -200,13 +201,20 @@ class AdaptivePoller:
 
         # Successful fetch: reset backoff state.
         self.consecutive_failures = 0
-        # Keep the fetched HTML so per-meeting status can be parsed without
+        # Keep the fetched HTML so per-meeting data can be parsed without
         # refetching (which would double-count the schedule fetch).
         self._last_schedule_html = html
+        # The dashboard must be re-fetched every tick: caching it across
+        # ticks froze open-presence state at whatever the first tick saw.
+        self._last_dashboard_html = None
 
         # Parse and persist the schedule.
         items: list[ParsedScheduleItem] = parse_daily_schedule(html)
         await self.repo.upsert_schedules(items)
+
+        # Sync per-meeting rows (official numbering, per-meeting lecturer,
+        # dates, and Simkuliah status) from the same today-page matrix.
+        await self._sync_meetings_from_today(html)
 
         # Build the list of active lectures (start, end) for interval calc.
         active_lectures: list[tuple[time, time]] = []
@@ -262,6 +270,26 @@ class AdaptivePoller:
                     except ValueError:
                         deadline_at = None
 
+                # Cards without a konfirmasi button (e.g. "anda sudah
+                # absen") carry no schedule id; resolve it from the course.
+                if schedule_id is None:
+                    try:
+                        schedule_id = await self.repo.resolve_schedule_id(item.course_code)
+                    except Exception:  # noqa: BLE001 - non-fatal
+                        schedule_id = None
+
+                # Persist the live card data (deadline, lecturer-opened,
+                # hadir when already absen) so the client sees real state.
+                if schedule_id is not None and meeting_no is not None:
+                    try:
+                        await self.repo.record_meeting_status(meeting_status, now=now)
+                    except Exception as exc:  # noqa: BLE001 - non-fatal
+                        logger.warning(
+                            "record meeting status failed for %s: %s",
+                            item.course_code,
+                            exc,
+                        )
+
             # Check the database for an active override on this meeting.
             has_override = False
             meeting_id: int | None = None
@@ -313,96 +341,46 @@ class AdaptivePoller:
 
             self._last_levels[meeting_key] = state
 
-        # Synchronize semester matrix status periodically
-        await self._sync_semester_matrix()
-
     # ------------------------------------------------------------------ #
     # Internal helpers
     # ------------------------------------------------------------------ #
 
-    async def _sync_semester_matrix(self) -> None:
-        """Fetch and synchronize the semester presence matrix into the database."""
+    async def _sync_meetings_from_today(self, html: str) -> None:
+        """Upsert per-meeting rows from the today-page meeting matrix.
+
+        The today page orders meeting cells by Simkuliah's official meeting
+        numbering (verified against the absensi dashboard), so column
+        position maps directly to ``meeting_number``. Each cell also carries
+        the real meeting date, the per-meeting lecturer (split-semester
+        courses change lecturer), and the attendance color. This replaces the
+        old semester-matrix sync, whose chronological column order desynced
+        meeting numbers by a week whenever a week was skipped.
+        """
         try:
-            fetch_fn = getattr(self.client, "fetch_semester_matrix", None)
-            if not fetch_fn:
-                return
-            html = await fetch_fn()
-            if not html or "simpletable" not in html:
+            courses = parse_meeting_matrix(html)
+            if not courses:
                 return
 
-            import re
-
-            from selectolax.lexbor import LexborHTMLParser
-
-            tree = LexborHTMLParser(html)
-            table = tree.css_first("table#simpletable")
-            if not table:
-                return
-
-            rows = table.css("tr")
-            for row in rows[2:]:
-                tds = row.css("td")
-                if len(tds) < 2:
+            records: list[dict[str, Any]] = []
+            for course in courses:
+                schedule_id = await self.repo.resolve_schedule_id(
+                    course.course_code, course.class_group
+                )
+                if schedule_id is None:
                     continue
-                code = tds[0].text(strip=True)
-                raw_name = tds[1].text(strip=True)
-                m_class = re.search(r"\(Kelas\s*:\s*([^)]+)\)", raw_name)
-                class_group = m_class.group(1).strip() if m_class else "A"
-
-                def _update_row(c=code, cg=class_group, cells=tds[2:]):
-                    sched_resp = (
-                        self.repo.client.table("schedules")
-                        .select("id")
-                        .eq("course_code", c)
-                        .eq("class_group", cg)
-                        .execute()
+                for meeting in course.meetings:
+                    records.append(
+                        {
+                            "schedule_id": schedule_id,
+                            "meeting_number": meeting.meeting_number,
+                            "meeting_date": meeting.meeting_date,
+                            "lecturer_name": meeting.lecturer,
+                            "simkuliah_status": meeting.status,
+                        }
                     )
-                    if not sched_resp.data:
-                        return
-                    sched_id = sched_resp.data[0]["id"]
-                    meetings_to_upsert = []
-                    for m_idx, td in enumerate(cells):
-                        m_num = m_idx + 1
-                        txt = td.text(strip=True)
-                        if not txt:
-                            continue
-                        m_date = re.search(
-                            r"tanggal\s*:\s*([A-Za-z]+,\s*)?(\d{2})-(\d{2})-(\d{4})",
-                            txt,
-                        )
-                        if m_date:
-                            d, m, y = m_date.group(2), m_date.group(3), m_date.group(4)
-                            meeting_date = f"{y}-{m}-{d}"
-                        else:
-                            meeting_date = datetime.now().strftime("%Y-%m-%d")
-
-                        td_class = td.attributes.get("class", "") or ""
-                        if "table-success" in td_class:
-                            status = "hadir"
-                        elif "table-danger" in td_class:
-                            status = "tidak_hadir"
-                        else:
-                            status = "pending"
-
-                        meetings_to_upsert.append(
-                            {
-                                "schedule_id": sched_id,
-                                "meeting_number": m_num,
-                                "meeting_date": meeting_date,
-                                "simkuliah_status": status,
-                            }
-                        )
-
-                    if meetings_to_upsert:
-                        self.repo.client.table("meetings").upsert(
-                            meetings_to_upsert,
-                            on_conflict="schedule_id,meeting_number",
-                        ).execute()
-
-                if hasattr(self.repo, "client") and self.repo.client:
-                    _update_row()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("semester matrix sync failed: %s", exc)
+            await self.repo.upsert_meetings(records)
+        except Exception as exc:  # noqa: BLE001 - sync failure is non-fatal
+            logger.warning("meeting matrix sync failed: %s", exc)
 
     def _idle_interval(self) -> int:
         """Return the configured idle interval in seconds."""
@@ -414,39 +392,28 @@ class AdaptivePoller:
             return _DEFAULT_IDLE_INTERVAL_SECONDS
 
     async def _fetch_meeting_status(self, item: ParsedScheduleItem) -> ParsedMeetingStatus | None:
-        """Return parsed attendance status for a schedule item.
+        """Return the dashboard card matching ``item``'s course, if open.
 
-        Parses the dashboard HTML (/index.php/absensi) or schedule HTML
-        through :func:`parse_attendance_status` to extract attendance status,
-        deadline, and presence parameters.
+        The dashboard renders one card per open attendance session; several
+        can be open simultaneously, so all cards are parsed and matched by
+        course code. Returns ``None`` when the session's presence is closed
+        or no card matches.
         """
-        dashboard_html = getattr(self, "_last_dashboard_html", "") or ""
-        if not dashboard_html:
+        dashboard_html = getattr(self, "_last_dashboard_html", None)
+        if dashboard_html is None:
             try:
                 dashboard_html = await self.client.fetch_dashboard()
-                self._last_dashboard_html = dashboard_html
-            except Exception:  # noqa: BLE001
-                dashboard_html = ""
-
-        if dashboard_html and (
-            "card" in dashboard_html.lower() or "absensi" in dashboard_html.lower()
-        ):
-            try:
-                status = parse_attendance_status(dashboard_html)
-                if status.is_open or status.is_student_present:
-                    return status
-            except Exception:  # noqa: BLE001
-                pass
-
-        html = getattr(self, "_last_schedule_html", "") or ""
-        if not html:
-            try:
-                html = await self.client.fetch_today_schedule()
             except Exception:  # noqa: BLE001 - never crash a tick
-                return None
-        if not html or "alert" not in html.lower():
+                dashboard_html = ""
+            self._last_dashboard_html = dashboard_html or ""
+
+        if not dashboard_html:
             return None
         try:
-            return parse_attendance_status(html)
+            cards = parse_attendance_cards(dashboard_html)
         except Exception:  # noqa: BLE001 - parse failure is non-fatal
             return None
+        for card in cards:
+            if card.course_code and card.course_code == item.course_code:
+                return card
+        return None
