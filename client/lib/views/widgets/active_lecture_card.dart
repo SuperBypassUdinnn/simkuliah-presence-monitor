@@ -180,20 +180,29 @@ class _ActiveLectureCardState extends State<ActiveLectureCard> {
 
   Widget _overrideChip(OverrideStyle style) {
     final isSelected = _activeOverride == style.type;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    // Lighten the accent on dark surfaces so unselected labels keep readable
+    // contrast, especially for deep colors such as Alpa maroon.
+    final accent = isDark
+        ? Color.lerp(style.color, Colors.white, 0.28)!
+        : style.color;
+
     return ChoiceChip(
-      avatar: Icon(
-        style.icon,
-        size: 16,
-        color: isSelected ? Colors.white : style.color,
-      ),
       label: Text(style.label),
       selected: isSelected,
+      showCheckmark: false,
       selectedColor: style.color,
+      backgroundColor: style.color.withValues(alpha: isDark ? 0.14 : 0.07),
       labelStyle: TextStyle(
-        color: isSelected ? Colors.white : style.color,
-        fontWeight: FontWeight.w600,
+        color: isSelected ? Colors.white : accent,
+        fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
       ),
-      side: BorderSide(color: style.color),
+      side: BorderSide(
+        color: isSelected ? Colors.white : accent,
+        width: isSelected ? 2 : 1,
+      ),
+      elevation: isSelected ? 3 : 0,
+      shadowColor: style.color,
       onSelected: _submitting
           ? null
           : (selected) {
@@ -234,21 +243,25 @@ class _ActiveLectureCardState extends State<ActiveLectureCard> {
       final style = OverrideStyle.of(
         widget.meeting.localOverride?['override_type']?.toString(),
       );
+      final isDark = Theme.of(context).brightness == Brightness.dark;
+      final accent = isDark
+          ? Color.lerp(style.color, Colors.white, 0.45)!
+          : style.color;
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: style.color.withValues(alpha: 0.15),
+          color: style.color.withValues(alpha: isDark ? 0.24 : 0.12),
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: style.color),
+          border: Border.all(color: accent),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(style.icon, color: style.color, size: 18),
+            Icon(style.icon, color: accent, size: 18),
             const SizedBox(width: 8),
             Text(
               'Keterangan: ${widget.meeting.effectiveStatus}',
-              style: TextStyle(color: style.color, fontWeight: FontWeight.bold),
+              style: TextStyle(color: accent, fontWeight: FontWeight.bold),
             ),
           ],
         ),
