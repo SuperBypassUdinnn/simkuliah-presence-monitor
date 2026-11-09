@@ -23,6 +23,13 @@ class NotificationLevel(StrEnum):
     WINDOW_EXPIRED = "window_expired"
 
 
+class Priority(StrEnum):
+    """Delivery priority tier for a dispatched notification."""
+
+    NORMAL = "normal"
+    HIGH = "high"
+
+
 # Backwards-compatible alias required by the task interface.
 NotificationState = NotificationLevel
 
@@ -51,6 +58,20 @@ _URGENT_WINDOW_MINUTES = 10
 
 # How close to the presence deadline before PENDING_REMINDER is raised.
 _PENDING_WINDOW_MINUTES = 15
+
+# Only these two levels escalate to high priority: the lecturer opening
+# presence, and the final minutes before the window closes. Every other
+# level stays normal (product decision, plan 04).
+_HIGH_PRIORITY_LEVELS = frozenset(
+    {NotificationLevel.LECTURER_OPENED, NotificationLevel.URGENT_CLOSING}
+)
+
+
+def priority_for_state(state: NotificationLevel) -> Priority:
+    """Return the delivery priority tier for ``state``."""
+    if state in _HIGH_PRIORITY_LEVELS:
+        return Priority.HIGH
+    return Priority.NORMAL
 
 
 def _rank(level: NotificationLevel | None) -> int:

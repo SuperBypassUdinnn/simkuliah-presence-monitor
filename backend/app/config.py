@@ -85,6 +85,11 @@ class Settings(BaseSettings):
     ACTION_SECRET_KEY: str
     NTFY_BASE_URL: str = "https://ntfy.sh"
 
+    # Public base URL of this backend, used as the target for signed ntfy
+    # action buttons. When empty, falls back to Render's automatically
+    # injected RENDER_EXTERNAL_URL.
+    SIMKULIAH_API_BASE_URL: str = ""
+
     # Managed database (Supabase)
     # Supports modern Secret Key (sb_secret_...) and legacy service_role key (retiring early 2027)
     SUPABASE_URL: str
@@ -95,6 +100,12 @@ class Settings(BaseSettings):
     POLL_ACTIVE_INTERVAL_SECONDS: int = 60
     POLL_PRE_CLASS_INTERVAL_SECONDS: int = 120
     POLL_IDLE_INTERVAL_SECONDS: int = 7200
+
+    @model_validator(mode="after")
+    def _resolve_api_base_url(self) -> Self:
+        if not self.SIMKULIAH_API_BASE_URL:
+            self.SIMKULIAH_API_BASE_URL = os.environ.get("RENDER_EXTERNAL_URL", "")
+        return self
 
     @model_validator(mode="after")
     def _validate_supabase_keys(self) -> Self:

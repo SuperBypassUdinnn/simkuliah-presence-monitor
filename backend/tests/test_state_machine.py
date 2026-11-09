@@ -11,7 +11,9 @@ from app.services.ntfy_service import NtfyDispatcher
 from app.services.state_machine import (
     NotificationLevel,
     NotificationState,
+    Priority,
     evaluate_notification_state,
+    priority_for_state,
 )
 
 # --------------------------------------------------------------------- #
@@ -245,6 +247,7 @@ def test_ntfy_dispatch_returns_true_on_success():
         topic="presence-test",
         secret="test-secret-key-32-chars-long-123456",
         client=client,
+        api_base_url="https://simkuliah-backend.example.com",
     )
     result = dispatcher.dispatch(
         NotificationLevel.LECTURER_OPENED,
@@ -271,6 +274,7 @@ def test_ntfy_dispatch_action_buttons_are_signed():
         topic="presence-test",
         secret="test-secret-key-32-chars-long-123456",
         client=client,
+        api_base_url="https://simkuliah-backend.example.com",
     )
     dispatcher.dispatch(
         NotificationLevel.PENDING_REMINDER,
@@ -286,3 +290,19 @@ def test_ntfy_dispatch_action_buttons_are_signed():
         assert label in actions
     # Each action carries a signed X-Action-Token header.
     assert actions.count("X-Action-Token") >= 3
+
+
+# --------------------------------------------------------------------- #
+# Priority policy
+# --------------------------------------------------------------------- #
+
+
+def test_priority_policy_only_two_urgent_levels():
+    assert priority_for_state(NotificationLevel.LECTURER_OPENED) is Priority.HIGH
+    assert priority_for_state(NotificationLevel.URGENT_CLOSING) is Priority.HIGH
+    for level in (
+        NotificationLevel.CLASS_STARTED,
+        NotificationLevel.PENDING_REMINDER,
+        NotificationLevel.WINDOW_EXPIRED,
+    ):
+        assert priority_for_state(level) is Priority.NORMAL
