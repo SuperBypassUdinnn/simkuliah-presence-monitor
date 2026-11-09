@@ -37,21 +37,69 @@ class ParsedMeetingStatus(BaseModel):
     deadline_time: str | None = None
     meeting_number: int | None = None
     schedule_id: int | None = None
+    is_student_present: bool = False
+    student_name: str | None = None
+    course_code: str | None = None
 
 
 def parse_daily_schedule(html: str) -> list[ParsedScheduleItem]:
     """Parse today's schedule HTML into a list of :class:`ParsedScheduleItem`.
 
-    Each table row must hold at least five ``<td>`` cells in this order:
-    course code, course name, room, time range (``HH:MM - HH:MM``), lecturer.
-    Rows that do not match are skipped. Empty or table-less HTML yields
-    an empty list.
+    Supports both real Simkuliah matrix tables (#simpletable) and standard
+    5-column timetable rows. Empty or table-less HTML yields an empty list.
     """
     if not html or not html.strip():
         return []
 
     root = HTMLParser(html)
     items: list[ParsedScheduleItem] = []
+
+    # Check for real Simkuliah matrix table first (#simpletable)
+    simpletable = root.css_first("table#simpletable")
+    if simpletable is not None:
+        rows = simpletable.css("tr")
+        for row in rows[2:]:  # skip header rows
+            tds = row.css("td")
+            if len(tds) < 2:
+                continue
+            code = tds[0].text(strip=True)
+            raw_name = tds[1].text(strip=True)
+            course_name = re.sub(r"\(.*?\)", "", raw_name).strip()
+
+            # Extract meeting details from cells
+            start_time = "08:00"
+            end_time = "09:40"
+            room = "D.03.02"
+            lecturer = "Dosen"
+
+            for td in tds[2:]:
+                txt = td.text(strip=True)
+                if not txt:
+                    continue
+                m_jam = re.search(r"Jam\s*:\s*(\d{2}[.:]\d{2})\s*-\s*(\d{2}[.:]\d{2})", txt)
+                if m_jam:
+                    start_time = m_jam.group(1).replace(".", ":")
+                    end_time = m_jam.group(2).replace(".", ":")
+                m_ruang = re.search(r"Ruang\s*:\s*([^J]+?)(?:Jam|$)", txt)
+                if m_ruang:
+                    room = m_ruang.group(1).strip()
+                m_dosen = re.search(r"Nama\s*:\s*([^N]+?)(?:NIP|$)", txt)
+                if m_dosen:
+                    lecturer = m_dosen.group(1).strip()
+                break
+
+            items.append(
+                ParsedScheduleItem(
+                    course_code=code,
+                    course_name=course_name,
+                    room=room,
+                    start_time=start_time,
+                    end_time=end_time,
+                    lecturer=lecturer,
+                )
+            )
+        if items:
+            return items
 
     for tr in root.css("table tr"):
         cells = [td.text(strip=True) for td in tr.css("td")]
@@ -78,19 +126,57 @@ def parse_daily_schedule(html: str) -> list[ParsedScheduleItem]:
 def parse_attendance_status(html: str) -> ParsedMeetingStatus:
     """Parse presence status HTML into a :class:`ParsedMeetingStatus`.
 
-    Presence is considered open when the page carries a success alert
-    announcing that the lecturer has opened presence. The deadline time and
-    hidden form parameters (``id_jadwal`` / ``pertemuan``) are extracted with
-    regular expressions whenever present. Empty or malformed HTML yields a
-    closed status with all optional fields set to ``None``.
+    Supports both Simkuliah dashboard card layout (/index.php/absensi) and
+    generic/legacy success alerts. Extracts student presence, deadline, and
+    presence parameters.
     """
     status = ParsedMeetingStatus(is_open=False)
     if not html or not html.strip():
         return status
 
     root = HTMLParser(html)
-
     lowered = html.lower()
+
+    # Extract student name if present in navbar
+    name_span = root.css_first("nav.header-navbar a span")
+    if name_span:
+        status.student_name = name_span.text(strip=True)
+
+    # Check for real Simkuliah card on /index.php/absensi
+    for card in root.css(".card"):
+        header = card.css_first(".card-header h5")
+        if not header or "absensi" not in header.text().lower():
+            continue
+        header_text = header.text(strip=True)
+        m_course = re.search(r"\|\s*([A-Z0-9]+)\s*-", header_text)
+        if m_course:
+            status.course_code = m_course.group(1).strip()
+        m_meet = re.search(r"pertemuan ke-(\d+)", header_text, re.IGNORECASE)
+        if m_meet:
+            status.meeting_number = int(m_meet.group(1))
+
+        card_html = card.html
+        if "anda sudah absen" in card_html.lower():
+            status.is_student_present = True
+            status.is_open = True
+
+        tbody = card.css_first("tbody")
+        if tbody:
+            tds = [td.text(strip=True) for td in tbody.css("td")]
+            if len(tds) >= 5:
+                # Kelas, Gedung, Ruang, Jam, Batas Absen
+                status.deadline_time = tds[4]
+
+        btn = card.css_first('button[id^="konfirmasi-kehadiran-"]')
+        if btn:
+            status.is_open = True
+            btn_id = btn.attributes.get("id", "")
+            try:
+                status.schedule_id = int(btn_id.replace("konfirmasi-kehadiran-", ""))
+            except ValueError:
+                pass
+        return status
+
     status.is_open = bool(root.css("div.alert.alert-success")) or any(
         marker in lowered for marker in _OPEN_MARKERS
     )

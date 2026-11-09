@@ -16,10 +16,10 @@ BASE_URL = "https://simkuliah.usk.ac.id"
 
 LOGIN_PATH = "/index.php/login/auth"
 CAPTCHA_PATH = "/index.php/login/captcha_image"
-DASHBOARD_PATH = "/index.php/mahasiswa/dashboard"
-TODAY_SCHEDULE_PATH = "/index.php/mahasiswa/jadwal_hari_ini"
-SEMESTER_MATRIX_PATH = "/index.php/mahasiswa/matriks_semester"
-PRESENCE_PATH = "/index.php/mahasiswa/presensi/simpan_presensi"
+DASHBOARD_PATH = "/index.php/absensi"
+TODAY_SCHEDULE_PATH = "/index.php/jadwal_kuliah/jadwal_kuliah_hari_ini"
+SEMESTER_MATRIX_PATH = "/index.php/jadwal_kuliah/index"
+PRESENCE_PATH = "/index.php/absensi/konfirmasi_kehadiran"
 
 MAX_LOGIN_ATTEMPTS = 3
 
@@ -35,7 +35,7 @@ _LOGIN_REDIRECT_MARKERS = ("/login", "login")
 
 # Markers that indicate a 3xx Location header points to an authenticated
 # destination (dashboard or mahasiswa area).
-_AUTHENTICATED_DESTINATION_MARKERS = ("dashboard", "mahasiswa")
+_AUTHENTICATED_DESTINATION_MARKERS = ("dashboard", "mahasiswa", "absensi")
 
 # Name of the CodeIgniter session cookie established by a successful login.
 _SESSION_COOKIE_NAME = "ci_session"
@@ -88,7 +88,7 @@ class SimkuliahClient:
                 "password": self.password,
                 "captcha_answer": captcha_answer,
             },
-            allow_redirects=False,
+            follow_redirects=False,
         )
         if response.status_code in SERVER_ERROR_STATUS_CODES:
             return {"success": False, "error": f"HTTP {response.status_code}"}
@@ -172,6 +172,10 @@ class SimkuliahClient:
         except httpx.HTTPError:
             return False
 
+    async def fetch_dashboard(self) -> str:
+        """Return the raw HTML of the main absensi dashboard page."""
+        return await self._get_html(DASHBOARD_PATH)
+
     async def fetch_today_schedule(self) -> str:
         """Return the raw HTML of today's schedule page."""
         return await self._get_html(TODAY_SCHEDULE_PATH)
@@ -180,25 +184,50 @@ class SimkuliahClient:
         """Return the raw HTML of the semester presence matrix page."""
         return await self._get_html(SEMESTER_MATRIX_PATH)
 
-    async def confirm_presence(self, schedule_id: int, meeting_no: int) -> bool:
+    async def confirm_presence(
+        self,
+        schedule_id: int | None = None,
+        meeting_no: int | None = None,
+        *,
+        kelas: str = "",
+        kd_mt_kul8: str = "",
+        jadwal_mulai: str = "",
+        jadwal_berakhir: str = "",
+        sks_mengajar: str = "2",
+        presence_id: str | None = None,
+    ) -> bool:
         """Confirm presence for a schedule meeting.
 
-        POSTs ``id_jadwal``, ``pertemuan`` and a ``status`` flag to the
-        presence endpoint using the authenticated cookie jar.
+        POSTs actual Simkuliah AJAX payload or falls back to legacy parameters
+        using the authenticated cookie jar.
         """
         try:
-            response = await self._client.post(
-                f"{self.base_url}{PRESENCE_PATH}",
-                data={
+            if kelas and kd_mt_kul8:
+                payload = {
+                    "kelas": kelas,
+                    "kd_mt_kul8": kd_mt_kul8,
+                    "jadwal_mulai": jadwal_mulai,
+                    "jadwal_berakhir": jadwal_berakhir,
+                    "pertemuan": str(meeting_no or 1),
+                    "sks_mengajar": sks_mengajar,
+                    "id": presence_id or str(schedule_id or ""),
+                }
+            else:
+                payload = {
                     "id_jadwal": schedule_id,
                     "pertemuan": meeting_no,
                     "status": "hadir",
-                },
+                }
+
+            response = await self._client.post(
+                f"{self.base_url}{PRESENCE_PATH}",
+                data=payload,
             )
             if response.status_code in SERVER_ERROR_STATUS_CODES:
                 return False
             response.raise_for_status()
-            return True
+            text = response.text if isinstance(response.text, str) else ""
+            return "success" in text.lower() or response.status_code == 200
         except httpx.HTTPError:
             return False
 

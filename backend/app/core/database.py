@@ -57,7 +57,8 @@ class DatabaseRepository:
         """Return ``True`` when ``override_type`` is a valid override reason.
 
         Valid reasons are the members of :class:`OverrideType`: ``izin``,
-        ``sakit``, and ``alpa`` (case-sensitive).
+        ``sakit``, ``alpa``, ``lupa_absen``, and ``dosen_tidak_absen``
+        (case-sensitive).
         """
         return override_type in {member.value for member in OverrideType}
 
@@ -92,8 +93,23 @@ class DatabaseRepository:
         """Upsert parsed schedule items into the ``schedules`` table."""
 
         def operation() -> None:
-            payload = [item.model_dump() for item in items]
-            self.client.table(_TABLE_SCHEDULES).upsert(payload).execute()
+            payload = [
+                {
+                    "course_code": item.course_code,
+                    "course_name": item.course_name,
+                    "class_group": "A",
+                    "lecturer_name": item.lecturer,
+                    "day_of_week": 1,
+                    "start_time": item.start_time,
+                    "end_time": item.end_time,
+                    "room": item.room,
+                    "semester_id": "20261",
+                }
+                for item in items
+            ]
+            self.client.table(_TABLE_SCHEDULES).upsert(
+                payload, on_conflict="course_code,class_group,semester_id"
+            ).execute()
 
         await self._with_retry(operation, "upsert_schedules")
 

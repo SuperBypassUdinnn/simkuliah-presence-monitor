@@ -167,6 +167,7 @@ class AdaptivePoller:
             seconds=interval,
             id="adaptive_poller_tick",
             replace_existing=True,
+            next_run_time=datetime.now(),
         )
         self.scheduler.start()
 
@@ -232,6 +233,7 @@ class AdaptivePoller:
             schedule_id: int | None = None
             meeting_no: int | None = None
             is_dosen_open = False
+            is_student_present = False
             deadline_at: datetime | None = None
 
             # Per-meeting attendance status (open/closed, deadline, schedule
@@ -250,6 +252,7 @@ class AdaptivePoller:
                 schedule_id = meeting_status.schedule_id
                 meeting_no = meeting_status.meeting_number
                 is_dosen_open = meeting_status.is_open
+                is_student_present = meeting_status.is_student_present
                 if meeting_status.deadline_time:
                     try:
                         deadline_at = datetime.combine(
@@ -277,7 +280,7 @@ class AdaptivePoller:
                 start_time=start_time,
                 end_time=end_time,
                 is_dosen_open=is_dosen_open,
-                is_student_present=False,
+                is_student_present=is_student_present,
                 has_override=has_override,
                 last_notified_level=last_level,
                 deadline_at=deadline_at,
@@ -302,9 +305,96 @@ class AdaptivePoller:
 
             self._last_levels[meeting_key] = state
 
+        # Synchronize semester matrix status periodically
+        await self._sync_semester_matrix()
+
     # ------------------------------------------------------------------ #
     # Internal helpers
     # ------------------------------------------------------------------ #
+
+    async def _sync_semester_matrix(self) -> None:
+        """Fetch and synchronize the semester presence matrix into the database."""
+        try:
+            fetch_fn = getattr(self.client, "fetch_semester_matrix", None)
+            if not fetch_fn:
+                return
+            html = await fetch_fn()
+            if not html or "simpletable" not in html:
+                return
+
+            import re
+
+            from selectolax.lexbor import LexborHTMLParser
+
+            tree = LexborHTMLParser(html)
+            table = tree.css_first("table#simpletable")
+            if not table:
+                return
+
+            rows = table.css("tr")
+            for row in rows[2:]:
+                tds = row.css("td")
+                if len(tds) < 2:
+                    continue
+                code = tds[0].text(strip=True)
+                raw_name = tds[1].text(strip=True)
+                m_class = re.search(r"\(Kelas\s*:\s*([^)]+)\)", raw_name)
+                class_group = m_class.group(1).strip() if m_class else "A"
+
+                def _update_row(c=code, cg=class_group, cells=tds[2:]):
+                    sched_resp = (
+                        self.repo.client.table("schedules")
+                        .select("id")
+                        .eq("course_code", c)
+                        .eq("class_group", cg)
+                        .execute()
+                    )
+                    if not sched_resp.data:
+                        return
+                    sched_id = sched_resp.data[0]["id"]
+                    meetings_to_upsert = []
+                    for m_idx, td in enumerate(cells):
+                        m_num = m_idx + 1
+                        txt = td.text(strip=True)
+                        if not txt:
+                            continue
+                        m_date = re.search(
+                            r"tanggal\s*:\s*([A-Za-z]+,\s*)?(\d{2})-(\d{2})-(\d{4})",
+                            txt,
+                        )
+                        if m_date:
+                            d, m, y = m_date.group(2), m_date.group(3), m_date.group(4)
+                            meeting_date = f"{y}-{m}-{d}"
+                        else:
+                            meeting_date = datetime.now().strftime("%Y-%m-%d")
+
+                        td_class = td.attributes.get("class", "") or ""
+                        if "table-success" in td_class:
+                            status = "hadir"
+                        elif "table-danger" in td_class:
+                            status = "tidak_hadir"
+                        else:
+                            status = "pending"
+
+                        meetings_to_upsert.append(
+                            {
+                                "schedule_id": sched_id,
+                                "meeting_number": m_num,
+                                "meeting_date": meeting_date,
+                                "simkuliah_status": status,
+                            }
+                        )
+
+                    if meetings_to_upsert:
+                        self.repo.client.table("meetings").upsert(
+                            meetings_to_upsert,
+                            on_conflict="schedule_id,meeting_number",
+                        ).execute()
+
+                if hasattr(self.repo, "client") and self.repo.client:
+                    _update_row()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("semester matrix sync failed: %s", exc)
 
     def _idle_interval(self) -> int:
         """Return the configured idle interval in seconds."""
@@ -318,12 +408,28 @@ class AdaptivePoller:
     async def _fetch_meeting_status(self, item: ParsedScheduleItem) -> ParsedMeetingStatus | None:
         """Return parsed attendance status for a schedule item.
 
-        Parses the schedule HTML already fetched during this tick (stored on
-        the instance) through :func:`parse_attendance_status` to extract
-        ``is_open``, ``deadline_time``, ``meeting_number``, and ``schedule_id``.
-        Falls back to a fresh schedule fetch only when no HTML was cached.
-        Returns ``None`` when no status could be determined.
+        Parses the dashboard HTML (/index.php/absensi) or schedule HTML
+        through :func:`parse_attendance_status` to extract attendance status,
+        deadline, and presence parameters.
         """
+        dashboard_html = getattr(self, "_last_dashboard_html", "") or ""
+        if not dashboard_html:
+            try:
+                dashboard_html = await self.client.fetch_dashboard()
+                self._last_dashboard_html = dashboard_html
+            except Exception:  # noqa: BLE001
+                dashboard_html = ""
+
+        if dashboard_html and (
+            "card" in dashboard_html.lower() or "absensi" in dashboard_html.lower()
+        ):
+            try:
+                status = parse_attendance_status(dashboard_html)
+                if status.is_open or status.is_student_present:
+                    return status
+            except Exception:  # noqa: BLE001
+                pass
+
         html = getattr(self, "_last_schedule_html", "") or ""
         if not html:
             try:

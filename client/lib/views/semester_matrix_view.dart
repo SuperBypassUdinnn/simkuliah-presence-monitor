@@ -1,3 +1,6 @@
+/// Purpose: Semester matrix table view displaying all courses and 16 meeting tiles horizontally.
+/// Data & Logic Flow: Fetches semester schedules with nested meetings, renders interactive matrix cells.
+/// Key Components: SemesterMatrixView
 import 'package:flutter/material.dart';
 
 import '../models/meeting_model.dart';
@@ -7,24 +10,10 @@ import 'widgets/meeting_grid_tile.dart';
 
 export 'widgets/meeting_grid_tile.dart';
 
-/// Semester presence matrix: one row per enrolled course showing the course
-/// name, an attendance progress bar with a 75% threshold marker, and a tile
-/// for each meeting of the semester.
-///
-/// When [testMode] is true a mock course with exactly 16 meetings is rendered
-/// without touching the network, which is useful for offline previews and
-/// widget tests. Otherwise courses and meetings are fetched from
-/// [presenceService] (or [`PresenceService`] when omitted).
-///
-/// The semester matrix future is initialized once in [State.initState] so
-/// that rebuilds do not re-trigger the network fetch.
+/// Semester presence matrix view: displays all semester courses and their 16
+/// meetings arranged horizontally in a clean matrix table, matching Simkuliah portal.
 class SemesterMatrixView extends StatefulWidget {
-  /// When true, renders a mock course with 16 meetings without calling the
-  /// network.
   final bool testMode;
-
-  /// Service used to fetch courses and meetings. Defaults to
-  /// [`PresenceService`] when omitted.
   final PresenceService? presenceService;
 
   const SemesterMatrixView({
@@ -38,214 +27,250 @@ class SemesterMatrixView extends StatefulWidget {
 }
 
 class _SemesterMatrixViewState extends State<SemesterMatrixView> {
-  /// Future resolving to the enrolled courses. Initialized once in
-  /// [initState] so rebuilds do not re-trigger the network fetch.
   late Future<List<ScheduleModel>> _matrixFuture;
-
-  /// Presence service used for live-mode fetches. Only set in live mode.
   late PresenceService _service;
 
   @override
   void initState() {
     super.initState();
+    _service = widget.presenceService ?? PresenceService();
     if (!widget.testMode) {
-      _service = widget.presenceService ?? PresenceService();
-      _matrixFuture = _service.fetchSemesterMatrix();
+      _loadMatrix();
     }
   }
 
-  /// Number of meetings per course in the semester matrix.
-  static const int _meetingsPerCourse = 16;
+  void _loadMatrix() {
+    setState(() {
+      _matrixFuture = _service.fetchSemesterMatrix();
+    });
+  }
 
-  /// Minimum attendance fraction expected of students (75%).
+  static const int _meetingsPerCourse = 16;
   static const double _attendanceThreshold = 0.75;
 
-  /// Mock meetings for test mode: meetings 1..16 with a mix of statuses so
-  /// the progress bar, threshold marker, and all five status colors are
-  /// exercised.
   List<MeetingModel> _mockMeetings(String courseName) {
     final statuses = <String>[
       'hadir',
       'hadir',
       'hadir',
+      'tidak_hadir',
       'hadir',
-      'izin',
-      'izin',
-      'sakit',
-      'alpa',
-      'pending',
-      'pending',
-      'pending',
-      'pending',
+      'hadir',
+      'hadir',
+      'tidak_hadir',
+      'hadir',
       'hadir',
       'pending',
-      'izin',
-      'sakit',
+      'pending',
+      'pending',
+      'pending',
+      'pending',
+      'pending',
     ];
     return List.generate(_meetingsPerCourse, (index) {
-      final number = index + 1;
       return MeetingModel(
-        id: number,
+        id: index + 1,
         courseName: courseName,
-        meetingNumber: number,
-        meetingDate: '2026-11-${(number % 28 + 1).toString().padLeft(2, '0')}',
+        meetingNumber: index + 1,
         simkuliahStatus: statuses[index],
         isPresenceOpen: false,
       );
     });
   }
 
-  /// Fraction of meetings with status Hadir, clamped to 0.0-1.0.
   double _attendancePercentage(List<MeetingModel> meetings) {
     if (meetings.isEmpty) return 0.0;
-    final hadir = meetings
-        .where((m) => m.effectiveStatus.toLowerCase() == 'hadir')
-        .length;
-    return (hadir / meetings.length).clamp(0.0, 1.0);
+    final attended = meetings.where((m) => m.isAttended).length;
+    return attended / _meetingsPerCourse;
   }
 
-  /// Attendance progress bar with a vertical marker at the 75% threshold.
-  Widget _attendanceBar(BuildContext context, double percentage) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final thresholdX = constraints.maxWidth * _attendanceThreshold;
-        return Stack(
-          alignment: Alignment.centerLeft,
-          children: [
-            LinearProgressIndicator(
-              value: percentage,
-              minHeight: 8,
-              borderRadius: BorderRadius.circular(4),
-              backgroundColor: Colors.grey.shade200,
-              valueColor: const AlwaysStoppedAnimation(Colors.green),
+  Widget _buildTableHeader(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest
+            .withOpacity(0.5),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(
+            width: 240,
+            child: Text(
+              'Mata Kuliah',
+              style: TextStyle(fontWeight: FontWeight.bold),
             ),
-            Positioned(
-              left: thresholdX - 1,
-              top: 0,
-              bottom: 0,
-              width: 2,
-              child: Container(
-                color: Colors.red,
-                margin: const EdgeInsets.symmetric(horizontal: 1),
-              ),
-            ),
-            Positioned(
-              left: thresholdX.clamp(0, constraints.maxWidth - 14),
-              top: -18,
-              child: const Text(
-                '75% target',
-                style: TextStyle(
-                  fontSize: 10,
-                  color: Colors.red,
-                  fontWeight: FontWeight.w600,
+          ),
+          ...List.generate(_meetingsPerCourse, (i) {
+            return Container(
+              width: 38,
+              alignment: Alignment.center,
+              child: Text(
+                '${i + 1}',
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
                 ),
               ),
+            );
+          }),
+          const SizedBox(width: 12),
+          const SizedBox(
+            width: 150,
+            child: Text(
+              'Rekap Kehadiran',
+              style: TextStyle(fontWeight: FontWeight.bold),
             ),
-          ],
-        );
-      },
+          ),
+        ],
+      ),
     );
   }
 
-  /// Grid of meeting tiles for one course, always showing [_meetingsPerCourse]
-  /// tiles numbered 1..16.
-  Widget _meetingGrid(List<MeetingModel> meetings) {
+  Widget _buildCourseRow(BuildContext context, ScheduleModel course) {
     final byNumber = <int, MeetingModel>{};
-    for (final meeting in meetings) {
+    for (final meeting in course.meetings) {
       byNumber[meeting.meetingNumber] = meeting;
     }
-    final tiles = List.generate(_meetingsPerCourse, (index) {
+
+    final meetings = List.generate(_meetingsPerCourse, (index) {
       final number = index + 1;
-      return MeetingGridTile(meeting: byNumber[number] ?? _placeholder(number));
+      return byNumber[number] ??
+          MeetingModel(
+            id: 0,
+            courseName: course.courseName,
+            courseCode: course.courseCode,
+            classGroup: course.classGroup,
+            lecturerName: course.lecturerName,
+            room: course.room,
+            startTime: course.startTime,
+            endTime: course.endTime,
+            meetingNumber: number,
+            simkuliahStatus: 'Pending',
+            isPresenceOpen: false,
+          );
     });
-    return GridView.count(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      crossAxisCount: 4,
-      mainAxisSpacing: 12,
-      crossAxisSpacing: 12,
-      childAspectRatio: 0.72,
-      children: tiles,
-    );
-  }
 
-  /// Placeholder pending meeting used when a course has fewer than 16 meetings
-  /// loaded, so the matrix always shows a complete 1..16 grid.
-  MeetingModel _placeholder(int number) {
-    return MeetingModel(
-      id: 0,
-      courseName: '',
-      meetingNumber: number,
-      simkuliahStatus: 'Pending',
-      isPresenceOpen: false,
-    );
-  }
-
-  /// One course section: name, attendance bar, and meeting grid.
-  Widget _courseSection(
-    BuildContext context,
-    String courseName,
-    List<MeetingModel> meetings,
-  ) {
     final percentage = _attendancePercentage(meetings);
-    final hadir = meetings
-        .where((m) => m.effectiveStatus.toLowerCase() == 'hadir')
-        .length;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(courseName, style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            Row(
+    final attendedCount = meetings.where((m) => m.isAttended).length;
+    final isPassing = percentage >= _attendanceThreshold;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.grey.withOpacity(0.15)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 240,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  '${(percentage * 100).round()}% hadir',
-                  style: Theme.of(context).textTheme.bodyMedium,
+                  course.courseName,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                const Spacer(),
+                const SizedBox(height: 2),
                 Text(
-                  '$hadir/${meetings.length}',
-                  style: Theme.of(context).textTheme.bodySmall,
+                  '${course.courseCode} · Kelas ${course.classGroup}',
+                  style: TextStyle(fontSize: 11, color: Colors.grey.shade400),
                 ),
               ],
             ),
-            const SizedBox(height: 6),
-            _attendanceBar(context, percentage),
-            const SizedBox(height: 12),
-            Text('Pertemuan', style: Theme.of(context).textTheme.bodySmall),
-            const SizedBox(height: 8),
-            _meetingGrid(meetings),
-          ],
-        ),
+          ),
+          ...meetings.map((m) {
+            return Container(
+              width: 38,
+              alignment: Alignment.center,
+              child: MeetingGridTile(
+                meeting: m,
+                compact: true,
+                presenceService: _service,
+                onOverrideChanged: _loadMatrix,
+              ),
+            );
+          }),
+          const SizedBox(width: 12),
+          SizedBox(
+            width: 150,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      '$attendedCount/$_meetingsPerCourse hadir',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: isPassing ? Colors.green : Colors.orange,
+                      ),
+                    ),
+                    Text(
+                      '${(percentage * 100).round()}%',
+                      style: const TextStyle(fontSize: 11, color: Colors.grey),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(
+                    value: percentage,
+                    minHeight: 6,
+                    backgroundColor: Colors.grey.shade800,
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      isPassing ? Colors.green : Colors.orange,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    // Test mode renders a mock course without touching Supabase, which is
-    // unavailable in widget tests.
     if (widget.testMode) {
+      final mock = _mockMeetings('Pemrograman Berorientasi Objek');
       return Scaffold(
         appBar: AppBar(title: const Text('Matriks Semester')),
         body: SingleChildScrollView(
-          padding: const EdgeInsets.all(12),
-          child: _courseSection(
-            context,
-            'Pemrograman Berorientasi Objek',
-            _mockMeetings('Pemrograman Berorientasi Objek'),
+          child: Column(
+            children: mock.map((m) => MeetingGridTile(meeting: m)).toList(),
           ),
         ),
       );
     }
 
-    // Live mode: courses are fetched once via the memoized [_matrixFuture],
-    // so rebuilds do not re-trigger the network request.
     return Scaffold(
-      appBar: AppBar(title: const Text('Matriks Semester')),
+      appBar: AppBar(
+        title: const Text('Matriks Semester'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Segarkan',
+            onPressed: _loadMatrix,
+          ),
+        ],
+      ),
       body: FutureBuilder<List<ScheduleModel>>(
         future: _matrixFuture,
         builder: (context, snapshot) {
@@ -254,69 +279,52 @@ class _SemesterMatrixViewState extends State<SemesterMatrixView> {
           }
           if (snapshot.hasError) {
             return Center(
-              child: Text('Gagal memuat jadwal: ${snapshot.error}'),
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.error_outline,
+                      size: 48,
+                      color: Colors.red,
+                    ),
+                    const SizedBox(height: 12),
+                    Text('Gagal memuat matriks semester:\n${snapshot.error}'),
+                    const SizedBox(height: 16),
+                    FilledButton.icon(
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Coba Lagi'),
+                      onPressed: _loadMatrix,
+                    ),
+                  ],
+                ),
+              ),
             );
           }
-          final schedules = snapshot.data ?? const <ScheduleModel>[];
-          if (schedules.isEmpty) {
-            return const Center(child: Text('Belum ada jadwal kuliah.'));
-          }
-          return ListView.builder(
-            padding: const EdgeInsets.all(12),
-            itemCount: schedules.length,
-            itemBuilder: (context, index) {
-              final schedule = schedules[index];
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: _courseSectionFuture(context, _service, schedule),
-              );
-            },
-          );
-        },
-      ),
-    );
-  }
 
-  /// Course section for live mode that fetches the meetings of one schedule.
-  Widget _courseSectionFuture(
-    BuildContext context,
-    PresenceService service,
-    ScheduleModel schedule,
-  ) {
-    return FutureBuilder<List<MeetingModel>>(
-      future: service.fetchMeetingsForSchedule(scheduleId: schedule.id),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
+          final courses = snapshot.data ?? const <ScheduleModel>[];
+          if (courses.isEmpty) {
+            return const Center(child: Text('Belum ada data jadwal semester.'));
+          }
+
+          return SingleChildScrollView(
+            scrollDirection: Axis.vertical,
+            padding: const EdgeInsets.all(12),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    schedule.courseName,
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 12),
-                  const Center(child: CircularProgressIndicator()),
+                  _buildTableHeader(context),
+                  const SizedBox(height: 6),
+                  ...courses.map((course) => _buildCourseRow(context, course)),
                 ],
               ),
             ),
           );
-        }
-        if (snapshot.hasError) {
-          return Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text(
-                'Gagal memuat pertemuan untuk ${schedule.courseName}: ${snapshot.error}',
-              ),
-            ),
-          );
-        }
-        final meetings = snapshot.data ?? const <MeetingModel>[];
-        return _courseSection(context, schedule.courseName, meetings);
-      },
+        },
+      ),
     );
   }
 }

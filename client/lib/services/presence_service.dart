@@ -10,48 +10,56 @@ import '../models/schedule_model.dart';
 
 /// Provides methods and streams for fetching today's meetings, the semester
 /// schedule matrix, and submitting presence overrides.
-///
-/// The Supabase client is injectable through the constructor so the service
-/// can be exercised offline with a mock client, mirroring the backend
-/// `DatabaseRepository` client-injection pattern.
 class PresenceService {
-  PresenceService({SupabaseClient? client})
-    : _client = client ?? Supabase.instance.client;
+  PresenceService({SupabaseClient? client}) : _customClient = client;
 
-  final SupabaseClient _client;
+  final SupabaseClient? _customClient;
+
+  SupabaseClient get _client {
+    if (_customClient != null) return _customClient;
+    return Supabase.instance.client;
+  }
 
   static const String _tableSchedules = 'schedules';
   static const String _tableMeetings = 'meetings';
-  static const String _tableOverrides = 'overrides';
+  static const String _tableOverrides = 'local_overrides';
 
   /// Stream of today's meetings, updated in real time via Supabase Realtime.
   Stream<List<MeetingModel>> watchTodaysMeetings({required DateTime today}) {
-    final start = DateTime(today.year, today.month, today.day);
+    final dateStr =
+        '${today.year.toString().padLeft(4, '0')}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
     return _client
         .from(_tableMeetings)
         .stream(primaryKey: ['id'])
-        .eq('meeting_date', start.toIso8601String())
+        .eq('meeting_date', dateStr)
         .map((rows) => rows.map(MeetingModel.fromJson).toList());
   }
 
-  /// Fetch today's meetings as a one-off future.
+  /// Fetch today's meetings as a one-off future, sorted by start_time.
   Future<List<MeetingModel>> fetchTodaysMeetings({
     required DateTime today,
   }) async {
-    final start = DateTime(today.year, today.month, today.day);
+    final dateStr =
+        '${today.year.toString().padLeft(4, '0')}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
     final response = await _client
         .from(_tableMeetings)
-        .select()
-        .eq('meeting_date', start.toIso8601String())
-        .order('meeting_number');
-    return response.map(MeetingModel.fromJson).toList();
+        .select('*, schedules(*), local_overrides(*)')
+        .eq('meeting_date', dateStr);
+
+    final meetings = response.map(MeetingModel.fromJson).toList();
+    meetings.sort((a, b) {
+      final cmp = a.startTime.compareTo(b.startTime);
+      if (cmp != 0) return cmp;
+      return a.meetingNumber.compareTo(b.meetingNumber);
+    });
+    return meetings;
   }
 
-  /// Fetch the full semester schedule matrix.
+  /// Fetch the full semester schedule matrix with all nested meetings.
   Future<List<ScheduleModel>> fetchSemesterMatrix() async {
     final response = await _client
         .from(_tableSchedules)
-        .select()
+        .select('*, meetings(*, local_overrides(*))')
         .order('course_code');
     return response.map(ScheduleModel.fromJson).toList();
   }
@@ -62,7 +70,7 @@ class PresenceService {
   }) async {
     final response = await _client
         .from(_tableMeetings)
-        .select()
+        .select('*, schedules(*), local_overrides(*)')
         .eq('schedule_id', scheduleId)
         .order('meeting_number');
     return response.map(MeetingModel.fromJson).toList();
@@ -76,20 +84,34 @@ class PresenceService {
   }) async {
     await _client.from(_tableOverrides).upsert({
       'meeting_id': meetingId,
-      'override_type': overrideType,
+      'override_type': overrideType.toLowerCase(),
       'note': note,
-      'is_active': true,
-    });
+    }, onConflict: 'meeting_id');
   }
 
-  /// Submit presence (open/closed) for a meeting.
+  /// Delete/clear local override for a meeting.
+  Future<void> clearOverride({required int meetingId}) async {
+    await _client.from(_tableOverrides).delete().eq('meeting_id', meetingId);
+  }
+
+  /// Submit presence confirmation (hadir) for a meeting.
+  ///
+  /// Clears any local overrides so 'hadir' maintains absolute authority.
   Future<void> submitPresence({
     required int meetingId,
     required bool isPresent,
   }) async {
     await _client
         .from(_tableMeetings)
-        .update({'is_presence_open': isPresent})
+        .update({
+          'simkuliah_status': isPresent ? 'hadir' : 'tidak_hadir',
+          'student_confirmed_at': DateTime.now().toIso8601String(),
+        })
         .eq('id', meetingId);
+
+    if (isPresent) {
+      // Overwrite and clear any conflicting local override
+      await _client.from(_tableOverrides).delete().eq('meeting_id', meetingId);
+    }
   }
 }
