@@ -7,8 +7,12 @@ environment:
   flutter: ">=3.22.0"
 
 dependencies:
+  firebase_core: ^5.1.0
+  firebase_messaging: ^17.0.1
   flutter:
     sdk: flutter
+  flutter_local_notifications: ^23.0.0
+  http: ^1.6.0
   supabase_flutter: ^2.5.2
 
 dev_dependencies:
