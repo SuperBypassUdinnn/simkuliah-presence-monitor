@@ -29,8 +29,17 @@ buttons, and the backend fixes those buttons depend on.
       schedule id.
 - [x] `compileSdk = 37` + core library desugaring for
       flutter_local_notifications 23.
-- [ ] Pending user input: Firebase Android app values (`google-services.json`)
-      to activate push on a real device; full-screen intent remains opt-in via
+- [x] Firebase Android app values wired via `client/.env` dart-defines
+      (owner-supplied `google-services.json`, project
+      `aesthetic-forge-472216-g1`); `applicationId` aligned to the registered
+      package `com.superbypassudin.simkuliah_monitor` (FCM requires an exact
+      match; installs require uninstalling any previous
+      `com.example.simkuliah_client` build).
+- [ ] Real-device validation: install the release APK, confirm the token
+      reaches `device_tokens` via the Render backend, and receive a live
+      push. Backend prerequisites: upload the Firebase service-account JSON
+      as a Render Secret File and set `FIREBASE_CREDENTIALS_PATH` in the
+      `.env` secret. Full-screen intent remains opt-in via
       `FCM_FULLSCREEN_INTENT`.
 
 ## 3. Objective Verification Matrix
