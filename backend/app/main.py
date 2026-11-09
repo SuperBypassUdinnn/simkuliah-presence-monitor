@@ -13,6 +13,8 @@ from fastapi import FastAPI
 
 from app.api.router import router as api_router
 from app.core.database import DatabaseRepository
+from app.services.dispatcher import MultiDispatcher
+from app.services.fcm_service import create_fcm_dispatcher
 from app.services.ntfy_service import NtfyDispatcher
 from app.services.poller import AdaptivePoller
 from app.services.simkuliah_client import SimkuliahClient
@@ -35,7 +37,11 @@ def _build_poller() -> AdaptivePoller:
             password=settings.SIMKULIAH_PASSWORD,
         )
         repo = DatabaseRepository()
-        dispatcher = NtfyDispatcher()
+        transports: list = [NtfyDispatcher()]
+        fcm_dispatcher = create_fcm_dispatcher(repo=repo)
+        if fcm_dispatcher is not None:
+            transports.append(fcm_dispatcher)
+        dispatcher = MultiDispatcher(transports)
     except Exception:  # noqa: BLE001 - offline/test environment
         client = MagicMock()
         repo = DatabaseRepository(client=MagicMock())

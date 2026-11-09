@@ -90,6 +90,13 @@ class Settings(BaseSettings):
     # injected RENDER_EXTERNAL_URL.
     SIMKULIAH_API_BASE_URL: str = ""
 
+    # Firebase Cloud Messaging (optional). When the service-account path is
+    # unset, FCM dispatch is disabled and ntfy remains the only transport.
+    FIREBASE_CREDENTIALS_PATH: str | None = None
+    # Phase 1 sends notification+data so Android shows heads-up without client
+    # changes; Phase 2 flips this to data-only for action buttons and channels.
+    FCM_DATA_ONLY: bool = False
+
     # Managed database (Supabase)
     # Supports modern Secret Key (sb_secret_...) and legacy service_role key (retiring early 2027)
     SUPABASE_URL: str

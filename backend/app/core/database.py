@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 from supabase import create_client
@@ -21,6 +22,7 @@ _TABLE_SCHEDULES = "schedules"
 _TABLE_MEETINGS = "meetings"
 _TABLE_OVERRIDES = "overrides"
 _TABLE_INCIDENTS = "incidents"
+_TABLE_DEVICE_TOKENS = "device_tokens"
 
 # Maximum number of attempts for an intermittent database call.
 _MAX_RETRIES = 3
@@ -53,6 +55,7 @@ class DatabaseRepository:
     # ------------------------------------------------------------------ #
     # Override-type validation
     # ------------------------------------------------------------------ #
+
     def is_valid_override(self, override_type: str) -> bool:
         """Return ``True`` when ``override_type`` is a valid override reason.
 
@@ -65,6 +68,7 @@ class DatabaseRepository:
     # ------------------------------------------------------------------ #
     # Internal helpers
     # ------------------------------------------------------------------ #
+
     def _require_valid_override(self, override_type: str) -> None:
         if not self.is_valid_override(override_type):
             raise ValueError(f"Invalid override type: {override_type!r}")
@@ -180,3 +184,63 @@ class DatabaseRepository:
             self.client.table(_TABLE_INCIDENTS).insert(payload).execute()
 
         await self._with_retry(operation, "log_incident")
+
+    # ------------------------------------------------------------------ #
+    # Device tokens (FCM push registry)
+    # ------------------------------------------------------------------ #
+
+    async def upsert_device_token(self, token: str, platform: str = "android") -> None:
+        """Register a device push token idempotently (by unique token)."""
+
+        def operation() -> Any:
+            return (
+                self.client.table(_TABLE_DEVICE_TOKENS)
+                .upsert(
+                    {
+                        "token": token,
+                        "platform": platform,
+                        "last_seen_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                    on_conflict="token",
+                )
+                .execute()
+            )
+
+        await self._with_retry(operation, "upsert_device_token")
+
+    async def delete_device_token(self, token: str) -> None:
+        """Remove a device push token from the registry."""
+
+        def operation() -> Any:
+            return self.client.table(_TABLE_DEVICE_TOKENS).delete().eq("token", token).execute()
+
+        await self._with_retry(operation, "delete_device_token")
+
+    def list_device_tokens_sync(self) -> list[str]:
+        """Return registered tokens (best-effort, synchronous).
+
+        Used by the FCM dispatcher, which runs on the polling loop and cannot
+        await. Any failure yields an empty list so a database hiccup never
+        suppresses the ntfy transport.
+        """
+        try:
+            response = (
+                self.client.table(_TABLE_DEVICE_TOKENS)
+                .select("token")
+                .order("last_seen_at", desc=True)
+                .limit(500)
+                .execute()
+            )
+            return [row["token"] for row in response.data or []]
+        except Exception as exc:  # noqa: BLE001 - best effort only
+            logger.warning("device token fetch failed: %s", exc)
+            return []
+
+    def prune_device_tokens_sync(self, tokens: list[str]) -> None:
+        """Remove tokens FCM reported as unregistered (best-effort)."""
+        if not tokens:
+            return
+        try:
+            (self.client.table(_TABLE_DEVICE_TOKENS).delete().in_("token", tokens).execute())
+        except Exception as exc:  # noqa: BLE001 - best effort only
+            logger.warning("device token prune failed: %s", exc)
