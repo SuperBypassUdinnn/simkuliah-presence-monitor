@@ -80,13 +80,14 @@ async def test_save_override_calls_client_with_payload():
     repo = DatabaseRepository(client=MagicMock())
     await repo.save_override(meeting_id=1042, override_type="izin", note="family matter")
 
-    repo.client.table.assert_called_with("overrides")
+    repo.client.table.assert_called_with("local_overrides")
     repo.client.table().upsert.assert_called_once()
     payload = repo.client.table().upsert.call_args[0][0]
     assert payload["meeting_id"] == 1042
     assert payload["override_type"] == "izin"
     assert payload["note"] == "family matter"
-    assert payload["is_active"] is True
+    assert "is_active" not in payload
+    assert repo.client.table().upsert.call_args[1] == {"on_conflict": "meeting_id"}
     repo.client.table().upsert().execute.assert_called_once()
 
 
@@ -101,7 +102,7 @@ async def test_save_override_rejects_invalid_type():
 @pytest.mark.asyncio
 async def test_get_active_override_returns_type():
     repo = DatabaseRepository(client=MagicMock())
-    repo.client.table().select().eq().eq().execute.return_value.data = [{"override_type": "sakit"}]
+    repo.client.table().select().eq().execute.return_value.data = [{"override_type": "sakit"}]
     result = await repo.get_active_override(meeting_id=1042)
     assert result == "sakit"
 
@@ -109,8 +110,24 @@ async def test_get_active_override_returns_type():
 @pytest.mark.asyncio
 async def test_get_active_override_returns_none_when_empty():
     repo = DatabaseRepository(client=MagicMock())
-    repo.client.table().select().eq().eq().execute.return_value.data = []
+    repo.client.table().select().eq().execute.return_value.data = []
     result = await repo.get_active_override(meeting_id=1042)
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_meeting_id_returns_id():
+    repo = DatabaseRepository(client=MagicMock())
+    repo.client.table().select().eq().eq().limit().execute.return_value.data = [{"id": 42}]
+    result = await repo.resolve_meeting_id(schedule_id=7, meeting_no=12)
+    assert result == 42
+
+
+@pytest.mark.asyncio
+async def test_resolve_meeting_id_returns_none_when_missing():
+    repo = DatabaseRepository(client=MagicMock())
+    repo.client.table().select().eq().eq().limit().execute.return_value.data = []
+    result = await repo.resolve_meeting_id(schedule_id=7, meeting_no=12)
     assert result is None
 
 

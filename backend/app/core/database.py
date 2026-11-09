@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 # Supabase tables written to by this repository.
 _TABLE_SCHEDULES = "schedules"
 _TABLE_MEETINGS = "meetings"
-_TABLE_OVERRIDES = "overrides"
+_TABLE_LOCAL_OVERRIDES = "local_overrides"
 _TABLE_INCIDENTS = "incidents"
 _TABLE_DEVICE_TOKENS = "device_tokens"
 
@@ -139,7 +139,11 @@ class DatabaseRepository:
     # Overrides
     # ------------------------------------------------------------------ #
     async def save_override(self, meeting_id: int, override_type: str, note: str = "") -> None:
-        """Save an override for a meeting, rejecting unknown override types."""
+        """Save an override for a meeting, rejecting unknown override types.
+
+        Upserts on ``meeting_id`` (the table has a UNIQUE constraint) to match
+        the client's semantics: one active override per meeting.
+        """
         self._require_valid_override(override_type)
 
         def operation() -> None:
@@ -147,27 +151,48 @@ class DatabaseRepository:
                 "meeting_id": meeting_id,
                 "override_type": override_type,
                 "note": note,
-                "is_active": True,
             }
-            self.client.table(_TABLE_OVERRIDES).upsert(payload).execute()
+            self.client.table(_TABLE_LOCAL_OVERRIDES).upsert(
+                payload, on_conflict="meeting_id"
+            ).execute()
 
         await self._with_retry(operation, "save_override")
 
     async def get_active_override(self, meeting_id: int) -> str | None:
-        """Return the active override type for a meeting, or ``None``."""
+        """Return the active override type for a meeting, or ``None``.
+
+        A row's existence means the override is active; the client clears the
+        row to remove it.
+        """
 
         def operation() -> Any:
             response = (
-                self.client.table(_TABLE_OVERRIDES)
+                self.client.table(_TABLE_LOCAL_OVERRIDES)
                 .select("override_type")
                 .eq("meeting_id", meeting_id)
-                .eq("is_active", True)
                 .execute()
             )
             data = response.data or []
             return data[0].get("override_type") if data else None
 
         return await self._with_retry(operation, "get_active_override")
+
+    async def resolve_meeting_id(self, schedule_id: int, meeting_no: int) -> int | None:
+        """Return the meetings-table id for ``(schedule_id, meeting_no)``."""
+
+        def operation() -> Any:
+            response = (
+                self.client.table(_TABLE_MEETINGS)
+                .select("id")
+                .eq("schedule_id", schedule_id)
+                .eq("meeting_number", meeting_no)
+                .limit(1)
+                .execute()
+            )
+            data = response.data or []
+            return data[0].get("id") if data else None
+
+        return await self._with_retry(operation, "resolve_meeting_id")
 
     # ------------------------------------------------------------------ #
     # Incidents
