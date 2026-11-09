@@ -24,7 +24,8 @@ alive only during the transition window.
 - [x] Phase 1 (#18): `device_tokens` table, FCM dispatcher, dual dispatch.
 - [x] Phase 2 (#19): Android client channels, local action buttons,
       full-screen intent opt-in (Firebase app values pending from the owner).
-- [ ] Phase 3 (#20): desktop realtime in-app notifications.
+- [x] Phase 3 (#20): desktop realtime in-app notifications (sticky banners for
+      lecturer-opened and urgent-closing, toasts otherwise).
 - [ ] Phase 4 (#21): retire ntfy dispatch (blocked until FCM is validated on a
       real device).
 

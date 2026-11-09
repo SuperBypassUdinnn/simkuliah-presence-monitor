@@ -1,11 +1,17 @@
 /// Purpose: Flutter client application entrypoint with responsive sidebar navigation and auto-refresh on focus.
-/// Data & Logic Flow: Initializes widget tree, theme configurations, and root layout with tab focus auto-refresh.
+/// Data & Logic Flow: Initializes widget tree, theme configurations, and root layout with tab focus auto-refresh; desktop additionally runs a realtime in-app alert service.
 /// Key Components: SimkuliahApp, MainHomeScreen
+import 'dart:async';
+import 'dart:io' show Platform;
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import 'core/app_notification.dart';
 import 'core/firebase_config.dart';
 import 'core/supabase_config.dart';
 import 'services/push_notification_service.dart';
+import 'services/realtime_alert_service.dart';
 import 'views/active_presence_view.dart';
 import 'views/semester_matrix_view.dart';
 import 'views/today_feed_view.dart';
@@ -66,15 +72,47 @@ class _MainHomeScreenState extends State<MainHomeScreen>
   int _activePresenceRefreshKey = 0;
   int _todayFeedRefreshKey = 0;
   int _semesterMatrixRefreshKey = 0;
+  RealtimeAlertService? _alertService;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Desktop in-app realtime alerts. Android relies on the FCM push stack
+    // instead, which also works while the app is backgrounded.
+    if (!kIsWeb && !Platform.isAndroid) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) {
+          return;
+        }
+        final service = RealtimeAlertService();
+        service.start(onAlert: _showRealtimeAlert);
+        setState(() {
+          _alertService = service;
+        });
+      });
+    }
+  }
+
+  /// Render one realtime alert in the overlay. Urgent alerts (lecturer opened
+  /// presence, window closing) are sticky: no auto-dismiss, close button only.
+  int _showRealtimeAlert(PresenceAlert alert) {
+    final scheme = Theme.of(context).colorScheme;
+    return AppNotification.show(
+      context,
+      title: alert.title,
+      message: alert.message,
+      color: alert.urgent ? scheme.error : scheme.primary,
+      icon: alert.urgent
+          ? Icons.notification_important_rounded
+          : Icons.info_outline,
+      duration: alert.urgent ? Duration.zero : const Duration(seconds: 4),
+    );
   }
 
   @override
   void dispose() {
+    unawaited(_alertService?.stop());
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }

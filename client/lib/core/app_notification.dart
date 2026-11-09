@@ -36,7 +36,11 @@ class AppNotification {
   static int _nextId = 0;
 
   /// Display a status notification above the current screen.
-  static void show(
+  ///
+  /// Returns the notification id, which can be passed to [dismiss] for
+  /// programmatic removal. A [duration] of [Duration.zero] creates a sticky
+  /// notification without auto-dismiss (close button only).
+  static int show(
     BuildContext context, {
     required String title,
     required String message,
@@ -44,9 +48,10 @@ class AppNotification {
     IconData icon = Icons.info_outline,
     Duration duration = const Duration(seconds: 4),
   }) {
+    final id = _nextId++;
     _active.add(
       _NotificationData(
-        id: _nextId++,
+        id: id,
         title: title,
         message: message,
         color: color,
@@ -65,9 +70,21 @@ class AppNotification {
     } else {
       _entry!.markNeedsBuild();
     }
+    return id;
   }
 
   static void _handleDismissed(int id) {
+    _active.removeWhere((data) => data.id == id);
+    if (_active.isEmpty) {
+      _entry?.remove();
+      _entry = null;
+    } else {
+      _entry?.markNeedsBuild();
+    }
+  }
+
+  /// Programmatically remove a notification by id (no exit animation).
+  static void dismiss(int id) {
     _active.removeWhere((data) => data.id == id);
     if (_active.isEmpty) {
       _entry?.remove();
@@ -169,7 +186,11 @@ class _NotificationCardState extends State<_NotificationCard>
     ).animate(curve);
     _fade = CurvedAnimation(parent: _controller, curve: Curves.easeOut);
     _controller.forward();
-    _timer = Timer(widget.data.duration, _dismiss);
+    // Duration.zero marks a sticky notification: no auto-dismiss, and the
+    // countdown bar is replaced by a static accent strip.
+    if (widget.data.duration > Duration.zero) {
+      _timer = Timer(widget.data.duration, _dismiss);
+    }
   }
 
   Future<void> _dismiss() async {
@@ -268,18 +289,21 @@ class _NotificationCardState extends State<_NotificationCard>
                       ],
                     ),
                   ),
-                  TweenAnimationBuilder<double>(
-                    tween: Tween<double>(begin: 1, end: 0),
-                    duration: widget.data.duration,
-                    builder: (context, value, child) {
-                      return LinearProgressIndicator(
-                        value: value,
-                        minHeight: 2,
-                        backgroundColor: Colors.transparent,
-                        valueColor: AlwaysStoppedAnimation<Color>(color),
-                      );
-                    },
-                  ),
+                  if (widget.data.duration > Duration.zero)
+                    TweenAnimationBuilder<double>(
+                      tween: Tween<double>(begin: 1, end: 0),
+                      duration: widget.data.duration,
+                      builder: (context, value, child) {
+                        return LinearProgressIndicator(
+                          value: value,
+                          minHeight: 2,
+                          backgroundColor: Colors.transparent,
+                          valueColor: AlwaysStoppedAnimation<Color>(color),
+                        );
+                      },
+                    )
+                  else
+                    Container(height: 2, color: color.withValues(alpha: 0.6)),
                 ],
               ),
             ),
