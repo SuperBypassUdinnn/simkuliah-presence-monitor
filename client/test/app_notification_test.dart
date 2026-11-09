@@ -42,6 +42,71 @@ void main() {
     expect(find.text('Keterangan Disimpan'), findsNothing);
   });
 
+  testWidgets('sticky notifications have no auto-dismiss and close manually', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => ElevatedButton(
+              onPressed: () => AppNotification.show(
+                context,
+                title: 'Presensi Segera Ditutup',
+                message: 'Kewirausahaan tutup dalam 5 menit.',
+                color: Colors.red,
+                duration: Duration.zero,
+              ),
+              child: const Text('Show'),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Show'));
+    await tester.pumpAndSettle();
+
+    // Far beyond any normal duration, the sticky banner remains.
+    await tester.pump(const Duration(seconds: 30));
+    expect(find.text('Presensi Segera Ditutup'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Tutup'));
+    await tester.pumpAndSettle();
+    expect(find.text('Presensi Segera Ditutup'), findsNothing);
+  });
+
+  testWidgets('show returns an id and dismiss removes it programmatically', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => ElevatedButton(
+              onPressed: () {
+                final id = AppNotification.show(
+                  context,
+                  title: 'Dosen Membuka Presensi',
+                  message: 'Segera konfirmasi kehadiran Anda.',
+                  color: Colors.red,
+                  duration: Duration.zero,
+                );
+                // Programmatic removal (e.g. the meeting resolved).
+                AppNotification.dismiss(id);
+              },
+              child: const Text('Show'),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Show'));
+    await tester.pumpAndSettle();
+    expect(find.text('Dosen Membuka Presensi'), findsNothing);
+  });
+
   testWidgets('newer notifications stack below older ones', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
