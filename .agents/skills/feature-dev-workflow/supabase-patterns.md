@@ -23,3 +23,9 @@
 
 ## 3. Schema Documentation Synchronization
 - Whenever a migration is authored, `docs/DATABASE_SCHEMA.md` must be updated in the same PR to remain the single source of truth.
+
+## 4. Modern API Keys (Early 2027 Deprecation)
+- Supabase legacy keys (`anon`, `service_role`) retire in early 2027.
+- Always configure the Flutter client with `SUPABASE_PUBLISHABLE_KEY` (`sb_publishable_...`).
+- Always configure the backend daemon with `SUPABASE_SECRET_KEY` (`sb_secret_...`).
+
