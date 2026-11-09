@@ -1,7 +1,8 @@
 # Simkuliah Backend
 
 Python FastAPI daemon that polls the Simkuliah USK portal, syncs attendance into
-Supabase, and dispatches ntfy.sh push notifications with signed action buttons.
+Supabase, and dispatches push notifications (ntfy + Firebase Cloud Messaging)
+with signed action buttons.
 
 ## Configuration through a single `.env` file
 
@@ -46,11 +47,28 @@ To rotate a credential or change polling behavior, edit the secret file
 contents and save; Render redeploys with the new values. `render.yaml` mirrors
 this setup and intentionally declares no `envVars`.
 
+## Firebase Cloud Messaging (optional but recommended)
+
+1. Create a free project at <https://console.firebase.google.com> and enable
+   Cloud Messaging.
+2. Generate a service-account key (Project Settings -> Service accounts ->
+   Generate new private key) and store it **outside** the repository, e.g.
+   `~/.config/simkuliah/firebase-service-account.json` (mode 0600).
+3. Point `FIREBASE_CREDENTIALS_PATH` at that file in your `.env`.
+4. On Render, upload the JSON as a second **Secret File** and set
+   `FIREBASE_CREDENTIALS_PATH=/etc/secrets/<filename>` inside the `.env`
+   secret file.
+
+With credentials present, the poller fans every notification out to both ntfy
+and FCM (`MultiDispatcher`); with them absent, FCM is silently skipped.
+
 ## API surface
 
 - `GET /api/v1/health` — liveness probe used by Render health checks.
-- `POST /api/v1/webhook/action` — HMAC-verified endpoint targeted by ntfy
-  action buttons.
+- `POST /api/v1/webhook/action` — HMAC-verified endpoint targeted by ntfy and
+  FCM action buttons.
+- `POST /api/v1/devices/register` — register or refresh an FCM device token.
+- `POST /api/v1/devices/unregister` — remove a device token.
 
 ## Verification
 
