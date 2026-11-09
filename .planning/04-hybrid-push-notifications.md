@@ -22,10 +22,11 @@ alive only during the transition window.
 ## 3. Implementation Steps
 - [x] Phase 0 (#17): unified priority policy, ntfy action URL/JSON fixes.
 - [x] Phase 1 (#18): `device_tokens` table, FCM dispatcher, dual dispatch.
-- [ ] Phase 2 (#19): Android client channels, local action buttons,
-      full-screen intent opt-in.
+- [x] Phase 2 (#19): Android client channels, local action buttons,
+      full-screen intent opt-in (Firebase app values pending from the owner).
 - [ ] Phase 3 (#20): desktop realtime in-app notifications.
-- [ ] Phase 4 (#21): retire ntfy dispatch.
+- [ ] Phase 4 (#21): retire ntfy dispatch (blocked until FCM is validated on a
+      real device).
 
 ## 4. Verification Gate
 ```bash
