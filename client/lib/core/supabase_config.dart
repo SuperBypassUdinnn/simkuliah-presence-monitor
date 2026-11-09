@@ -14,17 +14,25 @@ class SupabaseConfig {
     defaultValue: 'https://placeholder.supabase.co',
   );
 
-  /// Anon key supplied at build time via `--dart-define=SUPABASE_ANON_KEY=...`.
-  static const String supabaseAnonKey = String.fromEnvironment(
-    'SUPABASE_ANON_KEY',
-    defaultValue: 'placeholder-anon-key',
+  /// Modern Publishable API Key (`sb_publishable_...`) supplied at build time via
+  /// `--dart-define=SUPABASE_PUBLISHABLE_KEY=...` with fallback to legacy
+  /// `--dart-define=SUPABASE_ANON_KEY=...` (retiring early 2027).
+  static const String supabasePublishableKey = String.fromEnvironment(
+    'SUPABASE_PUBLISHABLE_KEY',
+    defaultValue: String.fromEnvironment(
+      'SUPABASE_ANON_KEY',
+      defaultValue: 'placeholder-publishable-key',
+    ),
   );
+
+  /// Backward-compatible alias for legacy references.
+  static String get supabaseAnonKey => supabasePublishableKey;
 
   /// Initializes the Supabase Flutter client. Safe to call before `runApp`.
   static Future<void> initialize() async {
     await Supabase.initialize(
       url: supabaseUrl,
-      publishableKey: supabaseAnonKey,
+      publishableKey: supabasePublishableKey,
     );
   }
 

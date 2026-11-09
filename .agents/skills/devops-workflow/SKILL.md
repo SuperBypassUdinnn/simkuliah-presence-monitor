@@ -24,8 +24,8 @@ The daemon image builds in two stages:
   - `SIMKULIAH_PASSWORD`: Portal password.
   - `NTFY_TOPIC`: Private topic identifier.
   - `ACTION_SECRET_KEY`: 32-character random HMAC signing key.
-  - `SUPABASE_URL`: Supabase project URL.
-  - `SUPABASE_SERVICE_ROLE_KEY`: Supabase service role API key.
+  - `SUPABASE_URL`: Supabase project URL (`https://<ref>.supabase.co`).
+  - `SUPABASE_SECRET_KEY`: Supabase Secret API key (`sb_secret_...`) or legacy `SUPABASE_SERVICE_ROLE_KEY`.
 
 ## 3. Local Verification Pipeline
 Always verify pipeline before creating pull requests:
