@@ -23,7 +23,13 @@ from app.services.simkuliah_client import SimkuliahClient
 router = APIRouter(prefix="/webhook")
 
 _VALID_ACTIONS = {"confirm_presence", "mark_override", "set_override"}
-_VALID_OVERRIDE_TYPES = {"izin", "sakit", "alpa"}
+_VALID_OVERRIDE_TYPES = {
+    "izin",
+    "sakit",
+    "alpa",
+    "lupa_absen",
+    "dosen_tidak_absen",
+}
 
 # In-memory idempotency store: action tokens already processed. Re-processing
 # the same token returns success cleanly instead of re-executing the action.

@@ -47,3 +47,4 @@ DerivedData/
 # Misc
 *.dart_tool
 .env
+*.iml

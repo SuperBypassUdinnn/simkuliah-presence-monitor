@@ -1,75 +1,275 @@
+/// Purpose: Individual meeting cell widget for the semester matrix.
+/// Data & Logic Flow: Renders colored meeting number/icon and interactive details dialog with override selector.
+/// Key Components: MeetingGridTile
 import 'package:flutter/material.dart';
 
+import '../../core/override_style.dart';
 import '../../models/meeting_model.dart';
+import '../../services/presence_service.dart';
 
 /// Statuses used to color a meeting indicator in the semester matrix.
-enum _MeetingIndicatorStatus { hadir, izin, sakit, alpa, pending }
+enum _MeetingIndicatorStatus {
+  hadir,
+  tidakHadir,
+  izin,
+  sakit,
+  alpa,
+  lupaAbsen,
+  dosenTidakAbsen,
+  pending,
+}
 
 /// A single cell in the semester matrix grid.
 ///
 /// Displays the meeting number (1-16) with a color-coded status indicator:
-/// Hadir (green), Izin (blue), Sakit (amber), Alpa (red), Pending (grey /
-/// outline). Tapping the tile opens a dialog with the meeting details.
+/// Hadir (green), Izin (blue), Sakit (amber), Alpa (red), Pending (grey / outline).
+/// Tapping the tile opens a dialog with the meeting details and local override options.
 class MeetingGridTile extends StatelessWidget {
   /// The meeting to display.
   final MeetingModel meeting;
 
-  const MeetingGridTile({super.key, required this.meeting});
+  /// Whether to render in compact table cell mode.
+  final bool compact;
+
+  /// Presence service for submitting local overrides.
+  final PresenceService? presenceService;
+
+  /// Callback when a local override is created, updated, or removed.
+  final VoidCallback? onOverrideChanged;
+
+  const MeetingGridTile({
+    super.key,
+    required this.meeting,
+    this.compact = false,
+    this.presenceService,
+    this.onOverrideChanged,
+  });
 
   _MeetingIndicatorStatus _status() {
     switch (meeting.effectiveStatus.toLowerCase()) {
       case 'hadir':
         return _MeetingIndicatorStatus.hadir;
+      case 'tidak_hadir':
+      case 'tidak hadir':
+        return _MeetingIndicatorStatus.tidakHadir;
       case 'izin':
         return _MeetingIndicatorStatus.izin;
       case 'sakit':
         return _MeetingIndicatorStatus.sakit;
       case 'alpa':
         return _MeetingIndicatorStatus.alpa;
+      case 'lupa_absen':
+      case 'lupa absen':
+        return _MeetingIndicatorStatus.lupaAbsen;
+      case 'dosen_tidak_absen':
+      case 'dosen tidak absen':
+        return _MeetingIndicatorStatus.dosenTidakAbsen;
       default:
         return _MeetingIndicatorStatus.pending;
     }
   }
 
-  MaterialColor _indicatorColor(_MeetingIndicatorStatus status) {
+  Color _indicatorColor(_MeetingIndicatorStatus status) {
     switch (status) {
       case _MeetingIndicatorStatus.hadir:
-        return Colors.green;
+        return const Color(0xFF16A34A);
+      case _MeetingIndicatorStatus.tidakHadir:
+        return const Color(0xFFDC2626);
       case _MeetingIndicatorStatus.izin:
-        return Colors.blue;
+        return OverrideStyle.izin.color;
       case _MeetingIndicatorStatus.sakit:
-        return Colors.amber;
+        return OverrideStyle.sakit.color;
       case _MeetingIndicatorStatus.alpa:
-        return Colors.red;
+        return OverrideStyle.alpa.color;
+      case _MeetingIndicatorStatus.lupaAbsen:
+        return OverrideStyle.lupaAbsen.color;
+      case _MeetingIndicatorStatus.dosenTidakAbsen:
+        return OverrideStyle.dosenTidakAbsen.color;
       case _MeetingIndicatorStatus.pending:
         return Colors.grey;
     }
   }
 
   void _showDetails(BuildContext context) {
+    final service = presenceService ?? PresenceService();
+    String? currentOverride = meeting.localOverride?['override_type']
+        ?.toString()
+        .toLowerCase();
+
     showDialog<void>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text('Pertemuan ${meeting.meetingNumber}'),
-        content: SingleChildScrollView(
-          child: ListBody(
-            children: [
-              Text('Course: ${meeting.courseName}'),
-              Text('Status: ${meeting.effectiveStatus}'),
-              Text('Date: ${meeting.meetingDate}'),
-              Text('Meeting ID: ${meeting.id}'),
-              Text('Presence open: ${meeting.isPresenceOpen}'),
-              if (meeting.deadlineAt != null)
-                Text('Deadline: ${meeting.deadlineAt!.toLocal()}'),
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: Text(
+              'Pertemuan ${meeting.meetingNumber}',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            content: SingleChildScrollView(
+              child: ListBody(
+                children: [
+                  _detailRow('Mata Kuliah', meeting.courseName),
+                  if (meeting.courseCode.isNotEmpty)
+                    _detailRow(
+                      'Kode & Kelas',
+                      '${meeting.courseCode} (Kelas ${meeting.classGroup})',
+                    ),
+                  _detailRow('Status Kehadiran', meeting.effectiveStatus),
+                  if (meeting.meetingDate.isNotEmpty)
+                    _detailRow('Tanggal', meeting.meetingDate),
+                  if (meeting.startTime.isNotEmpty)
+                    _detailRow(
+                      'Jam',
+                      '${meeting.startTime} - ${meeting.endTime} WIB',
+                    ),
+                  if (meeting.room.isNotEmpty)
+                    _detailRow('Ruang', meeting.room),
+                  if (meeting.lecturerName.isNotEmpty)
+                    _detailRow('Dosen', meeting.lecturerName),
+                  if (meeting.isPresenceOpen) ...[
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Presensi sedang dibuka oleh dosen!',
+                      style: TextStyle(
+                        color: Colors.orange,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                  if (!meeting.isAttended) ...[
+                    const SizedBox(height: 14),
+                    const Divider(),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Keterangan Mandiri:',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Colors.grey,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      children: OverrideStyle.all.map((style) {
+                        final type = style.type;
+                        final isSelected = currentOverride == type;
+                        final label = style.label;
+                        return ChoiceChip(
+                          avatar: Icon(
+                            style.icon,
+                            size: 16,
+                            color: isSelected ? Colors.white : style.color,
+                          ),
+                          label: Text(label),
+                          selected: isSelected,
+                          selectedColor: style.color,
+                          labelStyle: TextStyle(
+                            color: isSelected ? Colors.white : style.color,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          side: BorderSide(color: style.color),
+                          onSelected: (selected) async {
+                            if (!selected) return;
+                            final confirmed = await showDialog<bool>(
+                              context: context,
+                              builder: (c) => AlertDialog(
+                                title: const Text(
+                                  'Konfirmasi Keterangan Mandiri',
+                                ),
+                                content: Text(
+                                  'Apakah Anda yakin ingin menetapkan status pertemuan ini menjadi "$label"?',
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.of(c).pop(false),
+                                    child: const Text('Batal'),
+                                  ),
+                                  FilledButton(
+                                    style: FilledButton.styleFrom(
+                                      backgroundColor: style.color,
+                                      foregroundColor: Colors.white,
+                                    ),
+                                    onPressed: () => Navigator.of(c).pop(true),
+                                    child: Text(
+                                      'Simpan $label',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+
+                            if (confirmed == true && meeting.id > 0) {
+                              await service.submitOverride(
+                                meetingId: meeting.id,
+                                overrideType: type,
+                              );
+                              setDialogState(() {
+                                currentOverride = type;
+                              });
+                              if (context.mounted) {
+                                Navigator.of(dialogContext).pop();
+                                onOverrideChanged?.call();
+                              }
+                            }
+                          },
+                        );
+                      }).toList(),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('Tutup'),
+              ),
             ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _detailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 120,
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontWeight: FontWeight.w600,
+                color: Colors.grey,
+              ),
+            ),
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Close'),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(fontWeight: FontWeight.w500),
+            ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _letterBadge(String letter) {
+    return Text(
+      letter,
+      style: const TextStyle(
+        fontWeight: FontWeight.bold,
+        fontSize: 12,
+        color: Colors.white,
       ),
     );
   }
@@ -79,6 +279,70 @@ class MeetingGridTile extends StatelessWidget {
     final status = _status();
     final color = _indicatorColor(status);
     final pending = status == _MeetingIndicatorStatus.pending;
+
+    if (compact) {
+      Color bgColor;
+      Widget content;
+
+      switch (status) {
+        case _MeetingIndicatorStatus.hadir:
+          bgColor = _indicatorColor(status);
+          content = const Icon(Icons.check, size: 16, color: Colors.white);
+          break;
+        case _MeetingIndicatorStatus.tidakHadir:
+          bgColor = _indicatorColor(status);
+          content = const Icon(Icons.close, size: 16, color: Colors.white);
+          break;
+        case _MeetingIndicatorStatus.izin:
+          bgColor = OverrideStyle.izin.color;
+          content = _letterBadge(OverrideStyle.izin.letter);
+          break;
+        case _MeetingIndicatorStatus.sakit:
+          bgColor = OverrideStyle.sakit.color;
+          content = _letterBadge(OverrideStyle.sakit.letter);
+          break;
+        case _MeetingIndicatorStatus.alpa:
+          bgColor = OverrideStyle.alpa.color;
+          content = _letterBadge(OverrideStyle.alpa.letter);
+          break;
+        case _MeetingIndicatorStatus.lupaAbsen:
+          bgColor = OverrideStyle.lupaAbsen.color;
+          content = _letterBadge(OverrideStyle.lupaAbsen.letter);
+          break;
+        case _MeetingIndicatorStatus.dosenTidakAbsen:
+          bgColor = OverrideStyle.dosenTidakAbsen.color;
+          content = _letterBadge(OverrideStyle.dosenTidakAbsen.letter);
+          break;
+        case _MeetingIndicatorStatus.pending:
+          bgColor = Colors.grey.withValues(alpha: 0.12);
+          content = Text(
+            '${meeting.meetingNumber}',
+            style: const TextStyle(fontSize: 11, color: Colors.grey),
+          );
+          break;
+      }
+
+      return Tooltip(
+        message:
+            'P${meeting.meetingNumber}: ${meeting.effectiveStatus}\n${meeting.meetingDate}',
+        child: InkWell(
+          borderRadius: BorderRadius.circular(6),
+          onTap: () => _showDetails(context),
+          child: Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: bgColor,
+              borderRadius: BorderRadius.circular(6),
+              border: pending
+                  ? Border.all(color: Colors.grey.shade600, width: 0.8)
+                  : null,
+            ),
+            child: Center(child: content),
+          ),
+        ),
+      );
+    }
 
     return InkWell(
       borderRadius: BorderRadius.circular(12),
@@ -105,10 +369,7 @@ class MeetingGridTile extends StatelessWidget {
               child: Center(
                 child: Text(
                   '${meeting.meetingNumber}',
-                  style: TextStyle(
-                    color: pending ? color : color.shade900,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: TextStyle(color: color, fontWeight: FontWeight.bold),
                 ),
               ),
             ),
@@ -117,20 +378,15 @@ class MeetingGridTile extends StatelessWidget {
               'Pertemuan ${meeting.meetingNumber}',
               style: Theme.of(context).textTheme.labelSmall,
               textAlign: TextAlign.center,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
             ),
-            const SizedBox(height: 4),
             Text(
               meeting.effectiveStatus,
               style: TextStyle(
-                color: pending ? Colors.grey : color.shade700,
+                color: color,
                 fontSize: 10,
                 fontWeight: FontWeight.w600,
               ),
               textAlign: TextAlign.center,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
             ),
             const SizedBox(height: 8),
           ],

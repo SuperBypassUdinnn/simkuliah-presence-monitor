@@ -2,7 +2,8 @@
 
 Defines the typed records persisted to Supabase (schedules, meetings,
 overrides, incidents) and the :class:`OverrideType` enum that scopes valid
-override reasons to ``izin``, ``sakit``, and ``alpa``.
+override reasons to ``izin``, ``sakit``, ``alpa``, ``lupa_absen``, and
+``dosen_tidak_absen``.
 """
 
 from __future__ import annotations
@@ -18,6 +19,8 @@ class OverrideType(StrEnum):
     IZIN = "izin"
     SAKIT = "sakit"
     ALPA = "alpa"
+    LUPA_ABSEN = "lupa_absen"
+    DOSEN_TIDAK_ABSEN = "dosen_tidak_absen"
 
 
 class ScheduleRecord(BaseModel):

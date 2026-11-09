@@ -18,6 +18,8 @@ def test_override_type_enum_values():
     assert OverrideType.IZIN.value == "izin"
     assert OverrideType.SAKIT.value == "sakit"
     assert OverrideType.ALPA.value == "alpa"
+    assert OverrideType.LUPA_ABSEN.value == "lupa_absen"
+    assert OverrideType.DOSEN_TIDAK_ABSEN.value == "dosen_tidak_absen"
 
 
 def test_is_valid_override_accepts_valid_types():
@@ -25,6 +27,8 @@ def test_is_valid_override_accepts_valid_types():
     assert repo.is_valid_override("izin") is True
     assert repo.is_valid_override("sakit") is True
     assert repo.is_valid_override("alpa") is True
+    assert repo.is_valid_override("lupa_absen") is True
+    assert repo.is_valid_override("dosen_tidak_absen") is True
 
 
 def test_is_valid_override_rejects_invalid_types():

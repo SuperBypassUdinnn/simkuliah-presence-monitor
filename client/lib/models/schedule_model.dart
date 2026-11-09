@@ -1,3 +1,5 @@
+import 'meeting_model.dart';
+
 /// A course schedule row matching the database `schedules` table.
 ///
 /// Columns: id, course_code, course_name, class_group, room, start_time,
@@ -11,6 +13,7 @@ class ScheduleModel {
   final String startTime;
   final String endTime;
   final String lecturerName;
+  final List<MeetingModel> meetings;
 
   const ScheduleModel({
     required this.id,
@@ -21,18 +24,44 @@ class ScheduleModel {
     required this.startTime,
     required this.endTime,
     required this.lecturerName,
+    this.meetings = const [],
   });
 
   factory ScheduleModel.fromJson(Map<String, dynamic> json) {
+    final parentCourseName = json['course_name'] as String? ?? '';
+    final parentCourseCode = json['course_code'] as String? ?? '';
+    final parentClassGroup = json['class_group'] as String? ?? '';
+    final parentLecturer = json['lecturer_name'] as String? ?? '';
+    final parentRoom = json['room'] as String? ?? '';
+    final parentStartTime = json['start_time'] as String? ?? '';
+    final parentEndTime = json['end_time'] as String? ?? '';
+
+    List<MeetingModel> parsedMeetings = [];
+    if (json['meetings'] != null && json['meetings'] is List) {
+      parsedMeetings = (json['meetings'] as List).map((m) {
+        final mMap = Map<String, dynamic>.from(m as Map);
+        mMap.putIfAbsent('course_name', () => parentCourseName);
+        mMap.putIfAbsent('course_code', () => parentCourseCode);
+        mMap.putIfAbsent('class_group', () => parentClassGroup);
+        mMap.putIfAbsent('lecturer_name', () => parentLecturer);
+        mMap.putIfAbsent('room', () => parentRoom);
+        mMap.putIfAbsent('start_time', () => parentStartTime);
+        mMap.putIfAbsent('end_time', () => parentEndTime);
+        return MeetingModel.fromJson(mMap);
+      }).toList();
+      parsedMeetings.sort((a, b) => a.meetingNumber.compareTo(b.meetingNumber));
+    }
+
     return ScheduleModel(
       id: json['id'] as int,
-      courseCode: json['course_code'] as String,
-      courseName: json['course_name'] as String,
-      classGroup: json['class_group'] as String,
-      room: json['room'] as String,
-      startTime: json['start_time'] as String,
-      endTime: json['end_time'] as String,
-      lecturerName: json['lecturer_name'] as String,
+      courseCode: parentCourseCode,
+      courseName: parentCourseName,
+      classGroup: parentClassGroup,
+      room: parentRoom,
+      startTime: parentStartTime,
+      endTime: parentEndTime,
+      lecturerName: parentLecturer,
+      meetings: parsedMeetings,
     );
   }
 
