@@ -64,7 +64,7 @@ class OverrideStyle {
     type: 'dosen_tidak_absen',
     label: 'Dosen Tidak Absen',
     letter: 'D',
-    color: Color(0xFF475569),
+    color: Color(0xFF0D9488),
     icon: Icons.badge_outlined,
   );
 

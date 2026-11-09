@@ -25,6 +25,7 @@ semester matrix, while making every manual status visually unambiguous.
 - [x] Reconcile the semester matrix from the poller every cycle.
 - [x] Refresh the active client view on tab focus and window resume.
 - [x] Normalize status labels and improve dialog contrast.
+- [x] Polish override chip legibility in the today feed (F-008).
 
 ## 4. Verification Gate
 ```bash
