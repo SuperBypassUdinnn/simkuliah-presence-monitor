@@ -14,15 +14,18 @@ import httpx
 from app.core.security import create_action_token
 from app.services.state_machine import NotificationLevel
 
-# ntfy defaults, overridable through environment variables.
-DEFAULT_BASE_URL = os.environ.get("NTFY_BASE_URL", "https://ntfy.sh")
-DEFAULT_TOPIC = os.environ.get("NTFY_TOPIC", "simkuliah-presence")
-
+# ntfy defaults. When the app settings are importable they are the single
+# source of truth (which includes .env values); the os.environ fallback only
+# covers offline/test environments where app.config cannot be imported.
 try:
     from app.config import settings
 
+    DEFAULT_BASE_URL = settings.NTFY_BASE_URL
+    DEFAULT_TOPIC = settings.NTFY_TOPIC
     DEFAULT_SECRET = settings.ACTION_SECRET_KEY
 except Exception:  # noqa: BLE001 - offline/test environment lacks settings
+    DEFAULT_BASE_URL = os.environ.get("NTFY_BASE_URL", "https://ntfy.sh")
+    DEFAULT_TOPIC = os.environ.get("NTFY_TOPIC", "simkuliah-presence")
     DEFAULT_SECRET = os.environ.get("NTFY_ACTION_SECRET", "change-me-in-production")
 
 # Lifetime of a signed action token (15 minutes).

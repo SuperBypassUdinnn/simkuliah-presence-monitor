@@ -1,0 +1,16 @@
+# Never bake secrets or local artifacts into the image build context.
+.env
+.env.*
+!.env.example
+
+# Local Python artifacts
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Local development files
+tests/
+.git/

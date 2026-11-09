@@ -11,12 +11,14 @@ All plans are contract-first, test-driven, and trace directly to open GitHub bac
 ```mermaid
 graph TD
     P1["01: Core Architecture & Scaffolding (#1)"] --> P2["02: Presence Sync & Override UX (#5, #6, #7)"]
+    P1 --> P3["03: Backend Environment Management (#14)"]
 ```
 
 | Plan | Document | Target Issues | Parent | Primary Stack | Status | Core Objective |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **01** | [`01-architecture-mvp.md`](./01-architecture-mvp.md) | #1 | - | Core | Draft | Foundation architecture, scaffolding, and verification gates. |
 | **02** | [`02-presence-sync-and-override-ux.md`](./02-presence-sync-and-override-ux.md) | #5, #6, #7 | 01 | Cross-stack | In Progress | Reconcile Simkuliah attendance and clarify manual override UX. |
+| **03** | [`03-backend-env-management.md`](./03-backend-env-management.md) | #14 | 01 | Python | In Progress | Drive all backend configuration from a single `.env` file. |
 
 ---
 

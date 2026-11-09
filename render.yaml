@@ -1,3 +1,15 @@
+# Render Blueprint for the Simkuliah backend.
+#
+# ALL configuration lives in ONE secret file instead of per-variable
+# environment entries:
+#
+#   Dashboard -> simkuliah-backend -> Environment -> Secret Files
+#   Filename:  .env
+#   Contents:  fill in backend/.env.example and paste it here
+#
+# The file is mounted at /etc/secrets/.env and auto-detected at startup
+# (see backend/app/config.py), so no envVars block is needed below. Rotate or
+# change configuration by editing the secret file contents only.
 services:
   - type: web
     name: simkuliah-backend
@@ -8,21 +20,3 @@ services:
     region: singapore
     healthCheckPath: /api/v1/health
     autoDeploy: true
-    envVars:
-      - key: SIMKULIAH_NPM
-        sync: false
-      - key: SIMKULIAH_PASSWORD
-        sync: false
-      - key: NTFY_TOPIC
-        sync: false
-      - key: ACTION_SECRET_KEY
-        generateValue: true
-      - key: SUPABASE_URL
-        value: https://ftznonanlbshweysliar.supabase.co
-      - key: SUPABASE_SECRET_KEY
-        sync: false
-      - key: SIMKULIAH_API_BASE_URL
-        fromService:
-          type: web
-          name: simkuliah-backend
-          property: host
