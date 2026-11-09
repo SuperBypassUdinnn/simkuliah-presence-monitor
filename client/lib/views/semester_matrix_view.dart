@@ -1,8 +1,11 @@
 /// Purpose: Semester matrix table view displaying all courses and 16 meeting tiles horizontally.
-/// Data & Logic Flow: Fetches semester schedules with nested meetings, renders interactive matrix cells.
+/// Data & Logic Flow: Fetches semester schedules with nested meetings, renders interactive matrix cells, and silently refetches on refresh-bus events.
 /// Key Components: SemesterMatrixView
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import '../core/refresh_bus.dart';
 import '../models/meeting_model.dart';
 import '../models/schedule_model.dart';
 import '../services/presence_service.dart';
@@ -27,7 +30,11 @@ class SemesterMatrixView extends StatefulWidget {
 }
 
 class _SemesterMatrixViewState extends State<SemesterMatrixView> {
-  late Future<List<ScheduleModel>> _matrixFuture;
+  StreamSubscription<void>? _refreshSub;
+  List<ScheduleModel>? _courses;
+  bool _loading = true;
+  Object? _error;
+  bool _fetchInFlight = false;
   late PresenceService _service;
 
   @override
@@ -35,14 +42,52 @@ class _SemesterMatrixViewState extends State<SemesterMatrixView> {
     super.initState();
     _service = widget.presenceService ?? PresenceService();
     if (!widget.testMode) {
-      _loadMatrix();
+      unawaited(_loadMatrix(silent: false));
+      _refreshSub = RefreshBus.instance.stream.listen(
+        (_) => unawaited(_loadMatrix(silent: true)),
+      );
     }
   }
 
-  void _loadMatrix() {
-    setState(() {
-      _matrixFuture = _service.fetchSemesterMatrix();
-    });
+  @override
+  void dispose() {
+    unawaited(_refreshSub?.cancel());
+    super.dispose();
+  }
+
+  /// Fetch the semester matrix. [silent] keeps any cached data on screen and
+  /// swaps it in place when the fetch completes, so a focus-driven refresh
+  /// never flashes a loading spinner.
+  Future<void> _loadMatrix({required bool silent}) async {
+    if (_fetchInFlight) return;
+    _fetchInFlight = true;
+    if (!silent || _courses == null) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
+    try {
+      final courses = await _service.fetchSemesterMatrix();
+      if (!mounted) return;
+      setState(() {
+        _courses = courses;
+        _loading = false;
+        _error = null;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      // A failed silent refresh keeps the stale view; only the very first
+      // load surfaces the error screen.
+      if (_courses == null) {
+        setState(() {
+          _loading = false;
+          _error = error;
+        });
+      }
+    } finally {
+      _fetchInFlight = false;
+    }
   }
 
   static const int _meetingsPerCourse = 16;
@@ -198,7 +243,7 @@ class _SemesterMatrixViewState extends State<SemesterMatrixView> {
                 meeting: m,
                 compact: true,
                 presenceService: _service,
-                onOverrideChanged: _loadMatrix,
+                onOverrideChanged: () => unawaited(_loadMatrix(silent: true)),
               ),
             );
           }),
@@ -267,63 +312,58 @@ class _SemesterMatrixViewState extends State<SemesterMatrixView> {
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: 'Segarkan',
-            onPressed: _loadMatrix,
+            onPressed: () => unawaited(_loadMatrix(silent: true)),
           ),
         ],
       ),
-      body: FutureBuilder<List<ScheduleModel>>(
-        future: _matrixFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(
-                      Icons.error_outline,
-                      size: 48,
-                      color: Colors.red,
-                    ),
-                    const SizedBox(height: 12),
-                    Text('Gagal memuat matriks semester:\n${snapshot.error}'),
-                    const SizedBox(height: 16),
-                    FilledButton.icon(
-                      icon: const Icon(Icons.refresh),
-                      label: const Text('Coba Lagi'),
-                      onPressed: _loadMatrix,
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }
+      body: _buildBody(context),
+    );
+  }
 
-          final courses = snapshot.data ?? const <ScheduleModel>[];
-          if (courses.isEmpty) {
-            return const Center(child: Text('Belum ada data jadwal semester.'));
-          }
-
-          return SingleChildScrollView(
-            scrollDirection: Axis.vertical,
-            padding: const EdgeInsets.all(12),
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildTableHeader(context),
-                  const SizedBox(height: 6),
-                  ...courses.map((course) => _buildCourseRow(context, course)),
-                ],
+  Widget _buildBody(BuildContext context) {
+    if (_loading && _courses == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_error != null && _courses == null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.error_outline, size: 48, color: Colors.red),
+              const SizedBox(height: 12),
+              Text('Gagal memuat matriks semester:\n$_error'),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                icon: const Icon(Icons.refresh),
+                label: const Text('Coba Lagi'),
+                onPressed: () => unawaited(_loadMatrix(silent: false)),
               ),
-            ),
-          );
-        },
+            ],
+          ),
+        ),
+      );
+    }
+
+    final courses = _courses ?? const <ScheduleModel>[];
+    if (courses.isEmpty) {
+      return const Center(child: Text('Belum ada data jadwal semester.'));
+    }
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.vertical,
+      padding: const EdgeInsets.all(12),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildTableHeader(context),
+            const SizedBox(height: 6),
+            ...courses.map((course) => _buildCourseRow(context, course)),
+          ],
+        ),
       ),
     );
   }

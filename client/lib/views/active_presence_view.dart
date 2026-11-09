@@ -1,13 +1,17 @@
 /// Purpose: Active presence view strictly displaying currently open lectures.
-/// Data & Logic Flow: Streams meetings, filters for active schedule window, enables presence confirmation.
+/// Data & Logic Flow: Caches today's meetings, filters for the active schedule window, and silently refetches on refresh-bus events.
 /// Key Components: ActivePresenceView
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import '../core/refresh_bus.dart';
 import '../models/meeting_model.dart';
 import '../services/presence_service.dart';
 import 'widgets/active_lecture_card.dart';
 
-/// Active presence view: strictly displays lectures whose schedule is currently active today.
+/// Active presence view: strictly displays lectures whose schedule is
+/// currently active today.
 class ActivePresenceView extends StatefulWidget {
   final PresenceService? presenceService;
 
@@ -19,19 +23,63 @@ class ActivePresenceView extends StatefulWidget {
 
 class _ActivePresenceViewState extends State<ActivePresenceView> {
   late final PresenceService _service;
-  late Future<List<MeetingModel>> _meetingsFuture;
+  StreamSubscription<void>? _refreshSub;
+  List<MeetingModel>? _meetings;
+  bool _loading = true;
+  Object? _error;
+  bool _fetchInFlight = false;
 
   @override
   void initState() {
     super.initState();
     _service = widget.presenceService ?? PresenceService();
-    _loadMeetings();
+    unawaited(_load(silent: false));
+    _refreshSub = RefreshBus.instance.stream.listen(
+      (_) => unawaited(_load(silent: true)),
+    );
   }
 
-  void _loadMeetings() {
-    setState(() {
-      _meetingsFuture = _service.fetchTodaysMeetings(today: DateTime.now());
-    });
+  @override
+  void dispose() {
+    unawaited(_refreshSub?.cancel());
+    super.dispose();
+  }
+
+  /// Fetch today's meetings. [silent] keeps any cached data on screen and
+  /// swaps it in place when the fetch completes, so a focus-driven refresh
+  /// never flashes a loading spinner.
+  Future<void> _load({required bool silent}) async {
+    if (_fetchInFlight) return;
+    _fetchInFlight = true;
+    if (!silent || _meetings == null) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
+    try {
+      final meetings = await _service.fetchTodaysMeetings(
+        today: DateTime.now(),
+      );
+      if (!mounted) return;
+      setState(() {
+        _meetings = meetings;
+        _loading = false;
+        _error = null;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      // A failed silent refresh keeps the stale view; only the very first
+      // load surfaces the error screen.
+      if (_meetings == null) {
+        setState(() {
+          _loading = false;
+          _error = error;
+        });
+      }
+    } finally {
+      _fetchInFlight = false;
+    }
   }
 
   @override
@@ -43,114 +91,106 @@ class _ActivePresenceViewState extends State<ActivePresenceView> {
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: 'Segarkan',
-            onPressed: _loadMeetings,
+            onPressed: () => unawaited(_load(silent: true)),
           ),
         ],
       ),
-      body: FutureBuilder<List<MeetingModel>>(
-        future: _meetingsFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(
-                      Icons.error_outline,
-                      size: 48,
-                      color: Colors.red,
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      'Gagal memuat status presensi:\n${snapshot.error}',
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 16),
-                    FilledButton.icon(
-                      icon: const Icon(Icons.refresh),
-                      label: const Text('Coba Lagi'),
-                      onPressed: _loadMeetings,
-                    ),
-                  ],
+      body: _buildBody(context),
+    );
+  }
+
+  Widget _buildBody(BuildContext context) {
+    if (_loading && _meetings == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_error != null && _meetings == null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.error_outline, size: 48, color: Colors.red),
+              const SizedBox(height: 12),
+              Text(
+                'Gagal memuat status presensi:\n$_error',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                icon: const Icon(Icons.refresh),
+                label: const Text('Coba Lagi'),
+                onPressed: () => unawaited(_load(silent: false)),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final allMeetings = _meetings ?? const <MeetingModel>[];
+    // Strictly filter to lectures whose schedule is currently active right now
+    final activeMeetings = allMeetings
+        .where((m) => m.isWithinScheduleTime())
+        .toList();
+
+    if (activeMeetings.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primaryContainer
+                      .withValues(alpha: 0.3),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.schedule_outlined,
+                  size: 56,
+                  color: Theme.of(context).colorScheme.primary,
                 ),
               ),
-            );
-          }
-
-          final allMeetings = snapshot.data ?? const <MeetingModel>[];
-          // Strictly filter to lectures whose schedule is currently active right now
-          final activeMeetings = allMeetings.where((m) {
-            return m.isWithinScheduleTime();
-          }).toList();
-
-          if (activeMeetings.isEmpty) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(28),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.primaryContainer
-                            .withValues(alpha: 0.3),
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(
-                        Icons.schedule_outlined,
-                        size: 56,
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    const Text(
-                      'Tidak Ada Kuliah Berlangsung Saat Ini',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Tab ini khusus menampilkan mata kuliah yang sedang berlangsung dalam rentang jam saat ini. Silakan periksa tab "Jadwal Hari Ini" untuk melihat seluruh jadwal kuliah Anda.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.grey, height: 1.4),
-                    ),
-                    const SizedBox(height: 20),
-                    OutlinedButton.icon(
-                      icon: const Icon(Icons.refresh),
-                      label: const Text('Periksa Ulang'),
-                      onPressed: _loadMeetings,
-                    ),
-                  ],
-                ),
+              const SizedBox(height: 20),
+              const Text(
+                'Tidak Ada Kuliah Berlangsung Saat Ini',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                textAlign: TextAlign.center,
               ),
-            );
-          }
+              const SizedBox(height: 8),
+              const Text(
+                'Tab ini khusus menampilkan mata kuliah yang sedang berlangsung dalam rentang jam saat ini. Silakan periksa tab "Jadwal Hari Ini" untuk melihat seluruh jadwal kuliah Anda.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.grey, height: 1.4),
+              ),
+              const SizedBox(height: 20),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.refresh),
+                label: const Text('Periksa Ulang'),
+                onPressed: () => unawaited(_load(silent: true)),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
 
-          return RefreshIndicator(
-            onRefresh: () async => _loadMeetings(),
-            child: ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: activeMeetings.length,
-              itemBuilder: (context, index) {
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 14),
-                  child: ActiveLectureCard(
-                    meeting: activeMeetings[index],
-                    presenceService: _service,
-                    onStatusChanged: _loadMeetings,
-                    allowPresenceConfirmation: true,
-                  ),
-                );
-              },
+    return RefreshIndicator(
+      onRefresh: () => _load(silent: true),
+      child: ListView.builder(
+        padding: const EdgeInsets.all(16),
+        itemCount: activeMeetings.length,
+        itemBuilder: (context, index) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 14),
+            child: ActiveLectureCard(
+              meeting: activeMeetings[index],
+              presenceService: _service,
+              onStatusChanged: () => unawaited(_load(silent: true)),
+              allowPresenceConfirmation: true,
             ),
           );
         },
