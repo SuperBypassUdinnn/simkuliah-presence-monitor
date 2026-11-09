@@ -3,6 +3,7 @@
 /// Key Components: ActiveLectureCard
 import 'package:flutter/material.dart';
 
+import '../../core/app_notification.dart';
 import '../../core/override_style.dart';
 import '../../models/meeting_model.dart';
 import '../../services/presence_service.dart';
@@ -109,21 +110,23 @@ class _ActiveLectureCardState extends State<ActiveLectureCard> {
         isPresent: true,
       );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            backgroundColor: Colors.green,
-            content: Text('Presensi berhasil dikonfirmasi sebagai Hadir!'),
-          ),
+        AppNotification.show(
+          context,
+          title: 'Presensi Berhasil',
+          message: '${widget.meeting.courseName} tercatat sebagai Hadir.',
+          color: Colors.green.shade600,
+          icon: Icons.check_circle_outline,
         );
         widget.onStatusChanged?.call();
       }
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: Colors.red,
-            content: Text('Gagal mengonfirmasi kehadiran: $error'),
-          ),
+        AppNotification.show(
+          context,
+          title: 'Presensi Gagal',
+          message: 'Kehadiran tidak dapat dikonfirmasi: $error',
+          color: Colors.red.shade600,
+          icon: Icons.error_outline,
         );
       }
     } finally {
@@ -155,22 +158,25 @@ class _ActiveLectureCardState extends State<ActiveLectureCard> {
         overrideType: overrideType,
       );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: style.color,
-            content: Text('Keterangan mandiri disimpan sebagai $capitalized'),
-          ),
+        AppNotification.show(
+          context,
+          title: 'Keterangan Disimpan',
+          message:
+              '${widget.meeting.courseName} ditandai sebagai $capitalized.',
+          color: style.color,
+          icon: style.icon,
         );
         widget.onStatusChanged?.call();
       }
     } catch (error) {
       if (mounted) {
         setState(() => _activeOverride = null);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: Colors.red,
-            content: Text('Gagal menyimpan keterangan mandiri: $error'),
-          ),
+        AppNotification.show(
+          context,
+          title: 'Gagal Menyimpan',
+          message: 'Keterangan mandiri tidak dapat disimpan: $error',
+          color: Colors.red.shade600,
+          icon: Icons.error_outline,
         );
       }
     } finally {
