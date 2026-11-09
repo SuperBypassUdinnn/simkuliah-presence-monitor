@@ -18,8 +18,9 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.example.simkuliah_client"
+        // Application identity registered with the Firebase Android app
+        // (google-services.json); FCM delivery requires an exact match.
+        applicationId = "com.superbypassudin.simkuliah_monitor"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
