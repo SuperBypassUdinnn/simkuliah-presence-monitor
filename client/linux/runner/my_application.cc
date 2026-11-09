@@ -54,6 +54,10 @@ static void my_application_activate(GApplication* application) {
 
   gtk_window_set_default_size(window, 1280, 720);
 
+  // Prefer the themed icon installed by the packaging step; this falls back
+  // silently when running from a raw bundle without the icon installed.
+  gtk_window_set_default_icon_name("simkuliah-monitor");
+
   g_autoptr(FlDartProject) project = fl_dart_project_new();
   fl_dart_project_set_dart_entrypoint_arguments(
       project, self->dart_entrypoint_arguments);
