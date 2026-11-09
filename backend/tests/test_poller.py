@@ -118,6 +118,7 @@ def poller_deps():
     repo.upsert_schedules = AsyncMock()
     repo.record_meeting_status = AsyncMock()
     repo.get_active_override = AsyncMock(return_value=None)
+    repo.resolve_meeting_id = AsyncMock(return_value=42)
 
     dispatcher = MagicMock()
     dispatcher.dispatch = MagicMock(return_value=True)

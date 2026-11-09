@@ -120,6 +120,13 @@ async def webhook_action(
     elif action in ("mark_override", "set_override"):
         override_type = (body.override_type if body else None) or payload.get("override_type")
         meeting_id = (body.meeting_id if body else None) or payload.get("meeting_id")
+        if meeting_id is None:
+            # Action buttons signed by the poller carry (schedule_id,
+            # meeting_no); resolve the meetings-table id from those.
+            schedule_id = (body.schedule_id if body else None) or payload.get("schedule_id")
+            meeting_no = (body.meeting_no if body else None) or payload.get("meeting_no")
+            if schedule_id is not None and meeting_no is not None:
+                meeting_id = await _get_db().resolve_meeting_id(schedule_id, meeting_no)
         if override_type not in _VALID_OVERRIDE_TYPES:
             raise HTTPException(status_code=400, detail=f"Invalid override type: {override_type!r}")
         if meeting_id is None:

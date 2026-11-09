@@ -3,7 +3,9 @@
 /// Key Components: SimkuliahApp, MainHomeScreen
 import 'package:flutter/material.dart';
 
+import 'core/firebase_config.dart';
 import 'core/supabase_config.dart';
+import 'services/push_notification_service.dart';
 import 'views/active_presence_view.dart';
 import 'views/semester_matrix_view.dart';
 import 'views/today_feed_view.dart';
@@ -14,6 +16,12 @@ Future<void> main() async {
     await SupabaseConfig.initialize();
   } catch (e) {
     debugPrint('Supabase initialization note: $e');
+  }
+  try {
+    await FirebaseConfig.initialize();
+    await PushNotificationService.instance.initialize();
+  } catch (e) {
+    debugPrint('Push notification note: $e');
   }
   runApp(const SimkuliahApp());
 }

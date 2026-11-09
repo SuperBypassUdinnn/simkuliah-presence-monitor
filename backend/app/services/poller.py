@@ -264,12 +264,18 @@ class AdaptivePoller:
 
             # Check the database for an active override on this meeting.
             has_override = False
-            if schedule_id is not None:
+            meeting_id: int | None = None
+            if schedule_id is not None and meeting_no is not None:
                 try:
-                    override_type = await self.repo.get_active_override(schedule_id)
+                    meeting_id = await self.repo.resolve_meeting_id(schedule_id, meeting_no)
+                    override_type = (
+                        await self.repo.get_active_override(meeting_id)
+                        if meeting_id is not None
+                        else None
+                    )
                     has_override = override_type is not None
                 except Exception:  # noqa: BLE001 - DB failure is non-fatal
-                    logger.warning("override lookup failed for meeting %s", schedule_id)
+                    logger.warning("override lookup failed for %s P%s", schedule_id, meeting_no)
                     has_override = False
 
             meeting_key: int | str = schedule_id if schedule_id is not None else item.course_code
@@ -301,6 +307,8 @@ class AdaptivePoller:
                 "schedule_id": schedule_id,
                 "meeting_no": meeting_no,
             }
+            if meeting_id is not None:
+                context["meeting_id"] = meeting_id
             self.dispatcher.dispatch(state, context)
 
             self._last_levels[meeting_key] = state
