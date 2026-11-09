@@ -124,7 +124,8 @@ class MeetingGridTile extends StatelessWidget {
                     ),
                   if (meeting.room.isNotEmpty)
                     _detailRow('Ruang', meeting.room),
-                  if (meeting.lecturerName.isNotEmpty)
+                  if (meeting.lecturerName.isNotEmpty &&
+                      meeting.lecturerName.toLowerCase() != 'dosen')
                     _detailRow('Dosen', meeting.lecturerName),
                   if (meeting.isPresenceOpen) ...[
                     const SizedBox(height: 8),
@@ -156,13 +157,9 @@ class MeetingGridTile extends StatelessWidget {
                         final isSelected = currentOverride == type;
                         final label = style.label;
                         return ChoiceChip(
-                          avatar: Icon(
-                            style.icon,
-                            size: 16,
-                            color: isSelected ? Colors.white : style.color,
-                          ),
                           label: Text(label),
                           selected: isSelected,
+                          showCheckmark: false,
                           selectedColor: style.color,
                           labelStyle: TextStyle(
                             color: isSelected ? Colors.white : style.color,
@@ -191,9 +188,9 @@ class MeetingGridTile extends StatelessWidget {
                                       foregroundColor: Colors.white,
                                     ),
                                     onPressed: () => Navigator.of(c).pop(true),
-                                    child: Text(
-                                      'Simpan $label',
-                                      style: const TextStyle(
+                                    child: const Text(
+                                      'Konfirmasi',
+                                      style: TextStyle(
                                         fontWeight: FontWeight.bold,
                                         color: Colors.white,
                                       ),

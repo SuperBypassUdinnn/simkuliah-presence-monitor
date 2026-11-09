@@ -164,6 +164,38 @@ void main() {
       // The superseded lecturer key is consumed so it can never re-fire.
       expect(second.shownKeys.contains('1:lecturerOpened'), isTrue);
     });
+
+    test(
+      'windows that expired before the startup instant are never toasted',
+      () {
+        final startedAt = base;
+        final deadline = base.subtract(const Duration(hours: 2));
+        final result = RealtimeAlertEvaluator.evaluate(
+          meetings: [_meeting(id: 1, deadline: deadline)],
+          shownKeys: {},
+          now: base.add(const Duration(minutes: 5)),
+          suppressExpiredBefore: startedAt,
+        );
+
+        expect(result.alerts, isEmpty);
+        expect(result.resolvedMeetingIds, {1});
+        // The key is consumed so a later pass can never emit it either.
+        expect(result.shownKeys.contains('1:windowExpired'), isTrue);
+      },
+    );
+
+    test('a window that expires while running still toasts', () {
+      final startedAt = base;
+      final deadline = base.add(const Duration(minutes: 1));
+      final result = RealtimeAlertEvaluator.evaluate(
+        meetings: [_meeting(id: 1, deadline: deadline)],
+        shownKeys: {},
+        now: base.add(const Duration(minutes: 2)),
+        suppressExpiredBefore: startedAt,
+      );
+
+      expect(result.alerts.single.kind, PresenceAlertKind.windowExpired);
+    });
   });
 
   group('RealtimeAlertService', () {
@@ -277,18 +309,32 @@ void main() {
       tester,
     ) async {
       await pumpHarness(tester);
-      currentMeetings = [
-        _meeting(id: 11, deadline: base.subtract(const Duration(minutes: 1))),
-      ];
+      // A class started (no deadline yet): a normal, non-sticky toast whose
+      // window is still open relative to the startup baseline.
+      currentMeetings = [_meeting(id: 11)];
       // Manual pumps: pumpAndSettle would fast-forward through the toast's
       // own countdown animation and trigger the auto-dismiss early.
       await tester.tap(find.text('tick'));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
-      expect(find.text('Presensi Ditutup'), findsOneWidget);
+      expect(find.text('Kelas Dimulai'), findsOneWidget);
 
       await tester.pump(const Duration(seconds: 5));
       await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('Kelas Dimulai'), findsNothing);
+    });
+
+    testWidgets('windows expired before the service started stay silent', (
+      tester,
+    ) async {
+      await pumpHarness(tester);
+      // The service started when the harness was pumped (now == base); the
+      // meeting's window ended two hours earlier.
+      currentMeetings = [
+        _meeting(id: 12, deadline: base.subtract(const Duration(hours: 2))),
+      ];
+      await tick(tester);
+
       expect(find.text('Presensi Ditutup'), findsNothing);
     });
   });

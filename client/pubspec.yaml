@@ -1,5 +1,5 @@
 name: simkuliah_client
-description: Multi-platform Flutter client for the Simkuliah presence monitor.
+description: Simkuliah Monitor - multi-platform Flutter client for the Simkuliah presence monitor.
 publish_to: 'none'
 
 environment:

@@ -2,7 +2,7 @@
     <!-- FCM push notifications (runtime permission requested on Android 13+). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <application
-        android:label="simkuliah_client"
+        android:label="Simkuliah Monitor"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 
 import 'core/app_notification.dart';
 import 'core/firebase_config.dart';
+import 'core/refresh_bus.dart';
 import 'core/supabase_config.dart';
 import 'services/push_notification_service.dart';
 import 'services/realtime_alert_service.dart';
@@ -38,7 +39,7 @@ class SimkuliahApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Simkuliah Presence Monitor',
+      title: 'Simkuliah Monitor',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
@@ -69,9 +70,6 @@ class MainHomeScreen extends StatefulWidget {
 class _MainHomeScreenState extends State<MainHomeScreen>
     with WidgetsBindingObserver {
   int _currentIndex = 0;
-  int _activePresenceRefreshKey = 0;
-  int _todayFeedRefreshKey = 0;
-  int _semesterMatrixRefreshKey = 0;
   RealtimeAlertService? _alertService;
 
   @override
@@ -120,35 +118,25 @@ class _MainHomeScreenState extends State<MainHomeScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _refreshCurrentTab();
+      // Silent background refresh: views keep their cached content and swap
+      // it in place, so regaining focus never flashes a loading spinner.
+      RefreshBus.instance.requestRefresh();
     }
   }
 
   void _onTabSelected(int index) {
     setState(() {
       _currentIndex = index;
-      if (index == 0) _activePresenceRefreshKey++;
-      if (index == 1) _todayFeedRefreshKey++;
-      if (index == 2) _semesterMatrixRefreshKey++;
     });
+    // Tabs stay mounted in the IndexedStack; a silent refetch keeps their
+    // data fresh without remounting.
+    RefreshBus.instance.requestRefresh();
   }
 
-  void _refreshCurrentTab() {
-    setState(() {
-      if (_currentIndex == 0) _activePresenceRefreshKey++;
-      if (_currentIndex == 1) _todayFeedRefreshKey++;
-      if (_currentIndex == 2) _semesterMatrixRefreshKey++;
-    });
-  }
-
-  List<Widget> get _views => [
-    ActivePresenceView(
-      key: ValueKey('active_presence_$_activePresenceRefreshKey'),
-    ),
-    TodayFeedView(key: ValueKey('today_feed_$_todayFeedRefreshKey')),
-    SemesterMatrixView(
-      key: ValueKey('semester_matrix_$_semesterMatrixRefreshKey'),
-    ),
+  List<Widget> get _views => const [
+    ActivePresenceView(),
+    TodayFeedView(),
+    SemesterMatrixView(),
   ];
 
   Widget _buildNavItem({

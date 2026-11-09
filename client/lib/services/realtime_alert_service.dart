@@ -85,10 +85,16 @@ class RealtimeAlertEvaluator {
   /// Evaluate `meetings` at `now`, never re-emitting a key already in
   /// [shownKeys]. Deadline-free meetings (no open window) only produce a
   /// class-started toast while inside their scheduled time.
+  ///
+  /// Windows whose deadline passed before [suppressExpiredBefore] are marked
+  /// seen without toasting: they ended before the app started, so a
+  /// "presensi ditutup" toast would be stale noise (Android never shows
+  /// these because the alert service is desktop-only).
   static AlertEvaluation evaluate({
     required List<MeetingModel> meetings,
     required Set<String> shownKeys,
     required DateTime now,
+    DateTime? suppressExpiredBefore,
   }) {
     final alerts = <PresenceAlert>[];
     final resolved = <int>{};
@@ -107,6 +113,12 @@ class RealtimeAlertEvaluator {
       if (expired) {
         resolved.add(meeting.id);
         final key = _key(meeting.id, PresenceAlertKind.windowExpired);
+        if (suppressExpiredBefore != null &&
+            meeting.deadlineAt!.isBefore(suppressExpiredBefore)) {
+          // Stale: the window closed before the app started.
+          nextShown.add(key);
+          continue;
+        }
         if (nextShown.add(key)) {
           alerts.add(
             PresenceAlert(
@@ -216,6 +228,10 @@ class RealtimeAlertService {
   @visibleForTesting
   final Set<String> shownKeys = {};
 
+  /// When the service started: windows that ended before this instant are
+  /// never toasted (stale on startup).
+  DateTime? _startedAt;
+
   /// Sticky banner ids per alert key, so resolved meetings can dismiss them.
   final Map<String, int> _bannerIds = {};
 
@@ -237,6 +253,7 @@ class RealtimeAlertService {
     if (_subscription != null) {
       return;
     }
+    _startedAt = DateTime.now();
 
     final today = DateTime.now();
     final dateStr =
@@ -296,10 +313,14 @@ class RealtimeAlertService {
   }) {
     _lastMeetings = meetings;
     final now = clock?.call() ?? DateTime.now();
+    // Baseline on the first evaluation even when start() was never called
+    // (e.g. the test seam), so stale-window suppression always has a bound.
+    _startedAt ??= now;
     final result = RealtimeAlertEvaluator.evaluate(
       meetings: meetings,
       shownKeys: shownKeys,
       now: now,
+      suppressExpiredBefore: _startedAt,
     );
 
     shownKeys

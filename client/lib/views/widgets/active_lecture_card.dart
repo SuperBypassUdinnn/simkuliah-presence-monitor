@@ -141,7 +141,7 @@ class _ActiveLectureCardState extends State<ActiveLectureCard> {
       title: 'Konfirmasi Keterangan Mandiri',
       content:
           'Apakah Anda yakin ingin menetapkan status pertemuan ${widget.meeting.courseName} menjadi "$capitalized"?',
-      confirmLabel: 'Simpan $capitalized',
+      confirmLabel: 'Konfirmasi',
       confirmColor: style.color,
     );
 

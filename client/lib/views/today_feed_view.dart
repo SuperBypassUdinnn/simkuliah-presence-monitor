@@ -1,15 +1,19 @@
 /// Purpose: Today's schedule feed view displaying all daily lectures.
-/// Data & Logic Flow: Loads meetings for today sorted by schedule time without presence action buttons.
+/// Data & Logic Flow: Caches today's meetings and silently refetches on refresh-bus events so focus changes never flash a loading spinner.
 /// Key Components: TodayFeedView
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import '../core/refresh_bus.dart';
 import '../models/meeting_model.dart';
 import '../services/presence_service.dart';
 import 'widgets/active_lecture_card.dart';
 import 'widgets/gateway_alert_banner.dart';
 
-/// Today's feed: renders all of today's lecture meetings sorted by schedule start time.
-/// Strictly displays lecture details and allows local overrides if not yet attended.
+/// Today's feed: renders all of today's lecture meetings sorted by schedule
+/// start time. Strictly displays lecture details and allows local overrides
+/// if not yet attended.
 class TodayFeedView extends StatefulWidget {
   final PresenceService? presenceService;
 
@@ -21,19 +25,63 @@ class TodayFeedView extends StatefulWidget {
 
 class _TodayFeedViewState extends State<TodayFeedView> {
   late final PresenceService _service;
-  late Future<List<MeetingModel>> _meetingsFuture;
+  StreamSubscription<void>? _refreshSub;
+  List<MeetingModel>? _meetings;
+  bool _loading = true;
+  Object? _error;
+  bool _fetchInFlight = false;
 
   @override
   void initState() {
     super.initState();
     _service = widget.presenceService ?? PresenceService();
-    _loadMeetings();
+    unawaited(_load(silent: false));
+    _refreshSub = RefreshBus.instance.stream.listen(
+      (_) => unawaited(_load(silent: true)),
+    );
   }
 
-  void _loadMeetings() {
-    setState(() {
-      _meetingsFuture = _service.fetchTodaysMeetings(today: DateTime.now());
-    });
+  @override
+  void dispose() {
+    unawaited(_refreshSub?.cancel());
+    super.dispose();
+  }
+
+  /// Fetch today's meetings. [silent] keeps any cached data on screen and
+  /// swaps it in place when the fetch completes, so a focus-driven refresh
+  /// never flashes a loading spinner.
+  Future<void> _load({required bool silent}) async {
+    if (_fetchInFlight) return;
+    _fetchInFlight = true;
+    if (!silent || _meetings == null) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
+    try {
+      final meetings = await _service.fetchTodaysMeetings(
+        today: DateTime.now(),
+      );
+      if (!mounted) return;
+      setState(() {
+        _meetings = meetings;
+        _loading = false;
+        _error = null;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      // A failed silent refresh keeps the stale view; only the very first
+      // load surfaces the error screen.
+      if (_meetings == null) {
+        setState(() {
+          _loading = false;
+          _error = error;
+        });
+      }
+    } finally {
+      _fetchInFlight = false;
+    }
   }
 
   @override
@@ -45,98 +93,86 @@ class _TodayFeedViewState extends State<TodayFeedView> {
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: 'Segarkan',
-            onPressed: _loadMeetings,
+            onPressed: () => unawaited(_load(silent: true)),
           ),
         ],
       ),
-      body: FutureBuilder<List<MeetingModel>>(
-        future: _meetingsFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(
-                      Icons.error_outline,
-                      size: 48,
-                      color: Colors.red,
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      'Gagal memuat jadwal:\n${snapshot.error}',
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 16),
-                    FilledButton.icon(
-                      icon: const Icon(Icons.refresh),
-                      label: const Text('Coba Lagi'),
-                      onPressed: _loadMeetings,
-                    ),
-                  ],
-                ),
+      body: _buildBody(context),
+    );
+  }
+
+  Widget _buildBody(BuildContext context) {
+    if (_loading && _meetings == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_error != null && _meetings == null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.error_outline, size: 48, color: Colors.red),
+              const SizedBox(height: 12),
+              Text(
+                'Gagal memuat jadwal:\n$_error',
+                textAlign: TextAlign.center,
               ),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                icon: const Icon(Icons.refresh),
+                label: const Text('Coba Lagi'),
+                onPressed: () => unawaited(_load(silent: false)),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    final meetings = _meetings ?? const <MeetingModel>[];
+    if (meetings.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: const [
+              Icon(Icons.calendar_month_outlined, size: 56, color: Colors.grey),
+              SizedBox(height: 12),
+              Text(
+                'Tidak ada jadwal kuliah hari ini.',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              SizedBox(height: 6),
+              Text(
+                'Selamat beristirahat atau belajar mandiri!',
+                style: TextStyle(color: Colors.grey),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    return RefreshIndicator(
+      onRefresh: () => _load(silent: true),
+      child: ListView.builder(
+        padding: const EdgeInsets.all(16),
+        itemCount: meetings.length + 1,
+        itemBuilder: (context, index) {
+          if (index == 0) {
+            return const Padding(
+              padding: EdgeInsets.only(bottom: 12),
+              child: GatewayAlertBanner(hasOutage: false),
             );
           }
-          final meetings = snapshot.data ?? const <MeetingModel>[];
-          if (meetings.isEmpty) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: const [
-                    Icon(
-                      Icons.calendar_month_outlined,
-                      size: 56,
-                      color: Colors.grey,
-                    ),
-                    SizedBox(height: 12),
-                    Text(
-                      'Tidak ada jadwal kuliah hari ini.',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    SizedBox(height: 6),
-                    Text(
-                      'Selamat beristirahat atau belajar mandiri!',
-                      style: TextStyle(color: Colors.grey),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }
-          return RefreshIndicator(
-            onRefresh: () async => _loadMeetings(),
-            child: ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: meetings.length + 1,
-              itemBuilder: (context, index) {
-                if (index == 0) {
-                  return const Padding(
-                    padding: EdgeInsets.only(bottom: 12),
-                    child: GatewayAlertBanner(hasOutage: false),
-                  );
-                }
-                final meeting = meetings[index - 1];
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 14),
-                  child: ActiveLectureCard(
-                    meeting: meeting,
-                    presenceService: _service,
-                    onStatusChanged: _loadMeetings,
-                    allowPresenceConfirmation: false,
-                  ),
-                );
-              },
+          final meeting = meetings[index - 1];
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 14),
+            child: ActiveLectureCard(
+              meeting: meeting,
+              presenceService: _service,
+              onStatusChanged: () => unawaited(_load(silent: true)),
+              allowPresenceConfirmation: false,
             ),
           );
         },
