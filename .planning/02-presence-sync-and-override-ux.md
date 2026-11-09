@@ -27,6 +27,7 @@ semester matrix, while making every manual status visually unambiguous.
 - [x] Normalize status labels and improve dialog contrast.
 - [x] Polish override chip legibility in the today feed (F-008).
 - [x] Replace bottom snackbars with top-right status notifications (F-009).
+- [x] Stack simultaneous status notifications vertically (F-010).
 
 ## 4. Verification Gate
 ```bash
