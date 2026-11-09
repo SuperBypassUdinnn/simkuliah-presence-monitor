@@ -5,14 +5,13 @@ Key Components: NtfyDispatcher, dispatch_ntfy_notification
 
 from __future__ import annotations
 
-import json
 import os
 from typing import Any
 
 import httpx
 
 from app.core.security import create_action_token
-from app.services.state_machine import NotificationLevel
+from app.services.state_machine import NotificationLevel, Priority, priority_for_state
 
 # ntfy defaults. When the app settings are importable they are the single
 # source of truth (which includes .env values); the os.environ fallback only
@@ -23,10 +22,12 @@ try:
     DEFAULT_BASE_URL = settings.NTFY_BASE_URL
     DEFAULT_TOPIC = settings.NTFY_TOPIC
     DEFAULT_SECRET = settings.ACTION_SECRET_KEY
+    DEFAULT_API_BASE_URL = settings.SIMKULIAH_API_BASE_URL
 except Exception:  # noqa: BLE001 - offline/test environment lacks settings
     DEFAULT_BASE_URL = os.environ.get("NTFY_BASE_URL", "https://ntfy.sh")
     DEFAULT_TOPIC = os.environ.get("NTFY_TOPIC", "simkuliah-presence")
     DEFAULT_SECRET = os.environ.get("NTFY_ACTION_SECRET", "change-me-in-production")
+    DEFAULT_API_BASE_URL = os.environ.get("SIMKULIAH_API_BASE_URL", "")
 
 # Lifetime of a signed action token (15 minutes).
 _ACTION_TOKEN_TTL_SECONDS = 900
@@ -50,11 +51,15 @@ class NtfyDispatcher:
         topic: str = DEFAULT_TOPIC,
         secret: str = DEFAULT_SECRET,
         client: Any = None,
+        api_base_url: str = DEFAULT_API_BASE_URL,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.topic = topic
         self.secret = secret
         self._client = client
+        # Public origin of this backend. Action buttons are only emitted when
+        # it is known; otherwise they would point at ntfy.sh and never work.
+        self.api_base_url = api_base_url.rstrip("/") if api_base_url else ""
 
     # ------------------------------------------------------------------ #
     # Public API
@@ -70,11 +75,13 @@ class NtfyDispatcher:
         title, message, actions = self._build_payload(state, context)
         headers = {
             "Title": title,
-            "Message": message,
-            "Actions": self._actions_header(actions),
             "Priority": self._priority(state),
         }
-        body = json.dumps({"message": message, "actions": actions}).encode("utf-8")
+        if actions:
+            # ntfy header-based publishing: the raw body is the message text
+            # and the Actions header carries the click-to-act buttons.
+            headers["Actions"] = self._actions_header(actions)
+        body = message.encode("utf-8")
 
         client = self._client if self._client is not None else httpx
         try:
@@ -106,6 +113,11 @@ class NtfyDispatcher:
             base_payload["meeting_no"] = meeting_no
 
         actions: list[dict[str, str]] = []
+
+        if not self.api_base_url:
+            # Without a resolvable backend origin, action buttons would point
+            # at ntfy.sh and never work; send a plain notification instead.
+            return title, message, actions
 
         # "Presensi Sekarang" - direct presence confirmation.
         confirm_payload = dict(base_payload, action="confirm_presence")
@@ -148,17 +160,17 @@ class NtfyDispatcher:
         return texts[state]
 
     def _priority(self, state: NotificationLevel) -> str:
+        # Shared priority policy: only lecturer-opened and urgent-closing are
+        # elevated; ntfy "urgent" drives alarm-grade delivery in the app.
         return {
-            NotificationLevel.CLASS_STARTED: "default",
-            NotificationLevel.LECTURER_OPENED: "high",
-            NotificationLevel.PENDING_REMINDER: "high",
-            NotificationLevel.URGENT_CLOSING: "urgent",
-            NotificationLevel.WINDOW_EXPIRED: "max",
-        }[state]
+            Priority.NORMAL: "default",
+            Priority.HIGH: "urgent",
+        }[priority_for_state(state)]
 
     def _action_url(self, action: str) -> str:
-        # Webhook endpoint (Task 7) that verifies the signed token and acts.
-        return f"{self.base_url.rstrip('/')}/api/v1/webhook/action"
+        # Webhook endpoint that verifies the signed token and acts. Targets
+        # this backend's public origin, never the ntfy relay.
+        return f"{self.api_base_url}/api/v1/webhook/action"
 
     def _sign(self, payload: dict[str, Any]) -> str:
         return create_action_token(
