@@ -10,15 +10,13 @@ All plans are contract-first, test-driven, and trace directly to open GitHub bac
 
 ```mermaid
 graph TD
-    P1["01: Core Architecture & Scaffolding (#1)"] --> P2["02: Data Models & Persistence (#2)"]
-    P2 --> P3["03: Core API Services & Contracts (#3)"]
-    P3 --> P4["04: Client UI / Integration (#4)"]
-    P4 --> P5["05: End-to-End Verification & v1.0.0 (#5)"]
+    P1["01: Core Architecture & Scaffolding (#1)"] --> P2["02: Presence Sync & Override UX (#5, #6, #7)"]
 ```
 
 | Plan | Document | Target Issues | Parent | Primary Stack | Status | Core Objective |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **01** | [`01-architecture-mvp.md`](./01-architecture-mvp.md) | #1 | - | Core | Draft | Foundation architecture, scaffolding, and verification gates. |
+| **02** | [`02-presence-sync-and-override-ux.md`](./02-presence-sync-and-override-ux.md) | #5, #6, #7 | 01 | Cross-stack | In Progress | Reconcile Simkuliah attendance and clarify manual override UX. |
 
 ---
 
