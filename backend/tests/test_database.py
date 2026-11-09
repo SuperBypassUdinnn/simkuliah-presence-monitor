@@ -5,6 +5,7 @@ Key Components: test_override_suppression_logic, DatabaseRepository
 
 from __future__ import annotations
 
+from datetime import datetime
 from unittest.mock import MagicMock
 
 import pytest
@@ -60,19 +61,93 @@ async def test_upsert_schedules_calls_client():
 
 
 @pytest.mark.asyncio
-async def test_record_meeting_status_calls_client():
+async def test_record_meeting_status_upserts_live_state():
     repo = DatabaseRepository(client=MagicMock())
     status = ParsedMeetingStatus(
         is_open=True,
-        deadline_time="08:35:00",
-        meeting_number=7,
+        deadline_time="17:45:00",
+        meeting_number=12,
         schedule_id=1042,
+        is_student_present=True,
     )
-    await repo.record_meeting_status(status)
+    now = datetime(2026, 11, 9, 17, 20)
+    await repo.record_meeting_status(status, now=now)
 
     repo.client.table.assert_called_with("meetings")
-    repo.client.table().insert.assert_called_once()
-    repo.client.table().insert().execute.assert_called_once()
+    repo.client.table().upsert.assert_called_once()
+    payload = repo.client.table().upsert.call_args[0][0]
+    assert payload["schedule_id"] == 1042
+    assert payload["meeting_number"] == 12
+    assert payload["last_polled_at"] == now.astimezone().isoformat()
+    assert payload["lecturer_opened_at"] == now.astimezone().isoformat()
+    assert payload["simkuliah_status"] == "hadir"
+    # Deadline keeps the wall clock from Simkuliah with the local offset.
+    assert "T17:45:00" in payload["deadline_at"]
+    assert repo.client.table().upsert.call_args[1] == {"on_conflict": "schedule_id,meeting_number"}
+
+
+@pytest.mark.asyncio
+async def test_record_meeting_status_skips_ambiguous_row():
+    repo = DatabaseRepository(client=MagicMock())
+    status = ParsedMeetingStatus(is_open=True)
+    await repo.record_meeting_status(status)
+
+    repo.client.table.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_record_meeting_status_closed_card_only_touches_poll_time():
+    repo = DatabaseRepository(client=MagicMock())
+    status = ParsedMeetingStatus(is_open=False, meeting_number=3, schedule_id=1042)
+    now = datetime(2026, 11, 9, 19, 0)
+    await repo.record_meeting_status(status, now=now)
+
+    payload = repo.client.table().upsert.call_args[0][0]
+    assert "lecturer_opened_at" not in payload
+    assert "deadline_at" not in payload
+    assert "simkuliah_status" not in payload
+
+
+@pytest.mark.asyncio
+async def test_upsert_meetings_bulk_writes_matrix_rows():
+    repo = DatabaseRepository(client=MagicMock())
+    records = [
+        {
+            "schedule_id": 1,
+            "meeting_number": 12,
+            "meeting_date": "2026-11-09",
+            "lecturer_name": "Fathia Sabrina, S.T., M.Inf.Tech",
+            "simkuliah_status": "hadir",
+        },
+        {
+            "schedule_id": 1,
+            "meeting_number": 13,
+            "meeting_date": "2026-11-16",
+            "lecturer_name": "Fathia Sabrina, S.T., M.Inf.Tech",
+            "simkuliah_status": "pending",
+        },
+    ]
+    await repo.upsert_meetings(records)
+
+    repo.client.table.assert_called_with("meetings")
+    repo.client.table().upsert.assert_called_once_with(
+        records, on_conflict="schedule_id,meeting_number"
+    )
+
+
+@pytest.mark.asyncio
+async def test_upsert_meetings_empty_list_is_noop():
+    repo = DatabaseRepository(client=MagicMock())
+    await repo.upsert_meetings([])
+    repo.client.table.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_resolve_schedule_id_returns_id():
+    repo = DatabaseRepository(client=MagicMock())
+    repo.client.table().select().eq().eq().limit().execute.return_value.data = [{"id": 7}]
+    result = await repo.resolve_schedule_id("SINF6045", "A")
+    assert result == 7
 
 
 @pytest.mark.asyncio

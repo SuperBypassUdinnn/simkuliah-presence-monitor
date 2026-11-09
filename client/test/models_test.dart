@@ -15,6 +15,38 @@ void main() {
     expect(meeting.isOverridden, isTrue);
   });
 
+  test('MeetingModel prefers the meeting-level lecturer over the schedule', () {
+    final meeting = MeetingModel.fromJson({
+      'id': 20,
+      'meeting_number': 12,
+      'lecturer_name': 'Fathia Sabrina, S.T., M.Inf.Tech',
+      'schedules': {
+        'course_name': 'Penelusuran Informasi',
+        'course_code': 'SINF6045',
+        'lecturer_name': 'Prof. Dr. Taufik Fuadi Abidin, S.Si., M.Tech',
+      },
+    });
+    expect(meeting.lecturerName, 'Fathia Sabrina, S.T., M.Inf.Tech');
+  });
+
+  test(
+    'MeetingModel falls back to the schedule lecturer when meeting has none',
+    () {
+      final meeting = MeetingModel.fromJson({
+        'id': 21,
+        'meeting_number': 3,
+        'schedules': {
+          'course_name': 'Penelusuran Informasi',
+          'lecturer_name': 'Prof. Dr. Taufik Fuadi Abidin, S.Si., M.Tech',
+        },
+      });
+      expect(
+        meeting.lecturerName,
+        'Prof. Dr. Taufik Fuadi Abidin, S.Si., M.Tech',
+      );
+    },
+  );
+
   test('MeetingModel ensures Hadir supersedes local override', () {
     final json = {
       'id': 2,

@@ -64,6 +64,13 @@ class MeetingModel {
       resolvedEndTime = json['end_time'] as String? ?? '';
     }
 
+    // Split-semester courses change lecturer per meeting; the meeting-level
+    // value (synced from each Simkuliah matrix cell) wins when present.
+    final meetingLecturer = json['lecturer_name'] as String?;
+    if (meetingLecturer != null && meetingLecturer.isNotEmpty) {
+      resolvedLecturer = meetingLecturer;
+    }
+
     final status = (json['simkuliah_status'] as String? ?? 'Pending');
     final deadlineStr = json['deadline_at'] as String?;
     final deadline = deadlineStr != null

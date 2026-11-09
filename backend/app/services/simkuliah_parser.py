@@ -1,6 +1,6 @@
 """Purpose: High-performance DOM parsing for Simkuliah HTML pages.
-Data & Logic Flow: Parses daily schedule tables and real-time attendance alert indicators via Lexbor.
-Key Components: parse_daily_schedule, parse_attendance_status
+Data & Logic Flow: Parses the today-page meeting matrix, multi-card dashboard statuses, and daily schedule tables via Lexbor.
+Key Components: parse_daily_schedule, parse_meeting_matrix, parse_attendance_cards, parse_attendance_status
 """
 
 from __future__ import annotations
@@ -40,6 +40,29 @@ class ParsedMeetingStatus(BaseModel):
     is_student_present: bool = False
     student_name: str | None = None
     course_code: str | None = None
+
+
+class ParsedMeetingCell(BaseModel):
+    """One meeting cell from a course row of the Simkuliah matrix.
+
+    ``meeting_number`` follows Simkuliah's official numbering (the matrix
+    column order on ``jadwal_kuliah_hari_ini``), which the attendance system
+    itself uses on the absensi dashboard.
+    """
+
+    meeting_number: int
+    meeting_date: str  # ISO YYYY-MM-DD
+    lecturer: str = ""
+    status: str = "pending"  # hadir | tidak_hadir | pending
+
+
+class ParsedCourseMeetings(BaseModel):
+    """All parsed meeting cells for one course row of the matrix."""
+
+    course_code: str
+    course_name: str
+    class_group: str = "A"
+    meetings: list[ParsedMeetingCell] = []
 
 
 def parse_daily_schedule(html: str) -> list[ParsedScheduleItem]:
@@ -123,30 +146,109 @@ def parse_daily_schedule(html: str) -> list[ParsedScheduleItem]:
     return items
 
 
-def parse_attendance_status(html: str) -> ParsedMeetingStatus:
-    """Parse presence status HTML into a :class:`ParsedMeetingStatus`.
+_DATE_RE = re.compile(r"tanggal\s*:\s*(?:[A-Za-z]+,\s*)?(\d{2})-(\d{2})-(\d{4})")
+_LECTURER_RE = re.compile(r"Nama\s*:\s*(.+?)(?:NIP|$)", re.DOTALL)
+_CLASS_GROUP_RE = re.compile(r"\(Kelas\s*:\s*([^)]+)\)")
 
-    Supports both Simkuliah dashboard card layout (/index.php/absensi) and
-    generic/legacy success alerts. Extracts student presence, deadline, and
-    presence parameters.
+# Matrix cell background classes -> normalized simkuliah_status.
+_CELL_STATUS_CLASSES = (
+    ("table-success", "hadir"),
+    ("table-danger", "tidak_hadir"),
+)
+
+
+def parse_meeting_matrix(html: str) -> list[ParsedCourseMeetings]:
+    """Parse the Simkuliah meeting matrix into per-course meeting cells.
+
+    The source page must be ``jadwal_kuliah_hari_ini`` (or a matrix sharing
+    its layout): ``table#simpletable`` with two header rows and one row per
+    course whose cells 2..N are that course's meetings, numbered 1..N-2 in
+    Simkuliah's official order. Meeting numbers follow the column position —
+    NOT the chronological date order, which the semester matrix page uses
+    and which desyncs meeting numbers whenever a week is skipped.
+
+    Cells without a parsable date are skipped entirely; guessing "today"
+    corrupts meeting dates (the original off-by-one bug).
     """
-    status = ParsedMeetingStatus(is_open=False)
     if not html or not html.strip():
-        return status
+        return []
 
     root = HTMLParser(html)
-    lowered = html.lower()
+    table = root.css_first("table#simpletable")
+    if table is None:
+        return []
 
-    # Extract student name if present in navbar
+    courses: list[ParsedCourseMeetings] = []
+    for row in table.css("tr"):
+        tds = row.css("td")
+        if len(tds) < 3:
+            continue
+        code = tds[0].text(strip=True)
+        if not code or code.isdigit():
+            # Header rows: "Kode | Mata Kuliah | Pertemuan" and the numeric
+            # column labels.
+            continue
+        raw_name = tds[1].text(strip=True)
+        course_name = re.sub(r"\(.*?\)", "", raw_name).strip()
+        m_class = _CLASS_GROUP_RE.search(raw_name)
+        class_group = m_class.group(1).strip() if m_class else "A"
+
+        meetings: list[ParsedMeetingCell] = []
+        for offset, td in enumerate(tds[2:]):
+            text = td.text(strip=True)
+            m_date = _DATE_RE.search(text)
+            if not m_date:
+                continue
+            d, m, y = m_date.group(1), m_date.group(2), m_date.group(3)
+            m_lecturer = _LECTURER_RE.search(text)
+            status = "pending"
+            td_class = td.attributes.get("class", "") or ""
+            for marker, value in _CELL_STATUS_CLASSES:
+                if marker in td_class:
+                    status = value
+                    break
+            meetings.append(
+                ParsedMeetingCell(
+                    meeting_number=offset + 1,
+                    meeting_date=f"{y}-{m}-{d}",
+                    lecturer=m_lecturer.group(1).strip() if m_lecturer else "",
+                    status=status,
+                )
+            )
+
+        courses.append(
+            ParsedCourseMeetings(
+                course_code=code,
+                course_name=course_name,
+                class_group=class_group,
+                meetings=meetings,
+            )
+        )
+    return courses
+
+
+def parse_attendance_cards(html: str) -> list[ParsedMeetingStatus]:
+    """Parse every absensi card on the dashboard into meeting statuses.
+
+    The dashboard renders one card per open attendance session; several
+    classes can be open at once, so callers match cards to schedule items by
+    ``course_code`` instead of relying on the first card.
+    """
+    statuses: list[ParsedMeetingStatus] = []
+    if not html or not html.strip():
+        return statuses
+
+    root = HTMLParser(html)
+
     name_span = root.css_first("nav.header-navbar a span")
-    if name_span:
-        status.student_name = name_span.text(strip=True)
+    student_name = name_span.text(strip=True) if name_span else None
 
-    # Check for real Simkuliah card on /index.php/absensi
     for card in root.css(".card"):
         header = card.css_first(".card-header h5")
         if not header or "absensi" not in header.text().lower():
             continue
+        status = ParsedMeetingStatus(is_open=False, student_name=student_name)
+
         header_text = header.text(strip=True)
         m_course = re.search(r"\|\s*([A-Z0-9]+)\s*-", header_text)
         if m_course:
@@ -155,7 +257,7 @@ def parse_attendance_status(html: str) -> ParsedMeetingStatus:
         if m_meet:
             status.meeting_number = int(m_meet.group(1))
 
-        card_html = card.html
+        card_html = card.html or ""
         if "anda sudah absen" in card_html.lower():
             status.is_student_present = True
             status.is_open = True
@@ -175,7 +277,32 @@ def parse_attendance_status(html: str) -> ParsedMeetingStatus:
                 status.schedule_id = int(btn_id.replace("konfirmasi-kehadiran-", ""))
             except ValueError:
                 pass
+
+        statuses.append(status)
+    return statuses
+
+
+def parse_attendance_status(html: str) -> ParsedMeetingStatus:
+    """Parse the first presence status from dashboard HTML.
+
+    Backward-compatible wrapper over :func:`parse_attendance_cards`: returns
+    the first card when one exists, otherwise falls back to the generic/
+    legacy success-alert layout.
+    """
+    cards = parse_attendance_cards(html)
+    if cards:
+        return cards[0]
+
+    status = ParsedMeetingStatus(is_open=False)
+    if not html or not html.strip():
         return status
+
+    root = HTMLParser(html)
+    lowered = html.lower()
+
+    name_span = root.css_first("nav.header-navbar a span")
+    if name_span:
+        status.student_name = name_span.text(strip=True)
 
     status.is_open = bool(root.css("div.alert.alert-success")) or any(
         marker in lowered for marker in _OPEN_MARKERS
