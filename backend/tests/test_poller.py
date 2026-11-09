@@ -110,6 +110,8 @@ def poller_deps():
     client = MagicMock()
     client.login = AsyncMock(return_value=True)
     client.fetch_today_schedule = AsyncMock(return_value="<html>schedule</html>")
+    client.fetch_dashboard = AsyncMock(return_value="")
+    client.fetch_semester_matrix = AsyncMock(return_value="")
     client.aclose = AsyncMock()
 
     repo = MagicMock()
