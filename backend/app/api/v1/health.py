@@ -41,9 +41,17 @@ async def health() -> dict[str, object]:
         "simkuliah_status": "ok" | "degraded" | "pending" | "unknown"}``.
         ``simkuliah_status`` mirrors the poller's last sync so clients can
         warn about stale presence data while the backend itself is healthy.
+        ``last_tick`` carries the most recent tick's per-stage telemetry
+        (page title, html size, parsed counts, per-stage errors) so a
+        "successful fetch that persists nothing" is diagnosable without
+        backend log access.
     """
-    return {
+    payload: dict[str, object] = {
         "status": "ok",
         "service": SERVICE_NAME,
         "simkuliah_status": _simkuliah_status(),
     }
+    poller = runtime.get_poller()
+    if isinstance(poller, AdaptivePoller):
+        payload["last_tick"] = dict(poller.last_tick)
+    return payload

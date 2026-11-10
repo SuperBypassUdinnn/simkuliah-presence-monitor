@@ -192,6 +192,7 @@ async def test_health_endpoint():
     # Offline test builds register a real AdaptivePoller with mock deps that
     # never ran a tick, so the upstream status is "pending", not a failure.
     assert body["simkuliah_status"] == "pending"
+    assert isinstance(body["last_tick"], dict)
 
 
 @pytest.mark.asyncio

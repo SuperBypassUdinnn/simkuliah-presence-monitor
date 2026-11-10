@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import datetime, time, timedelta
 from typing import Any
 
@@ -36,6 +37,21 @@ _DEFAULT_IDLE_INTERVAL_SECONDS = 7200
 # Exponential backoff tuning.
 _BASE_BACKOFF_SECONDS = 30
 _MAX_BACKOFF_SECONDS = 300
+
+_TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+
+
+def _page_title(html: str) -> str:
+    """Return the page's ``<title>`` text (truncated) for tick telemetry.
+
+    Distinguishes at a glance which page a "successful" fetch actually
+    returned (login page, dashboard, schedule matrix) without shipping the
+    HTML anywhere.
+    """
+    match = _TITLE_RE.search(html)
+    if not match:
+        return ""
+    return " ".join(match.group(1).split())[:120]
 
 
 def calculate_next_poll_interval(
@@ -120,6 +136,11 @@ class AdaptivePoller:
         # Completion time of the last successful sync cycle; surfaced by the
         # health endpoint so clients can detect stale Simkuliah data.
         self.last_success_at: datetime | None = None
+        # Per-stage telemetry of the most recent tick (html size, parsed
+        # counts, per-stage errors); surfaced by the health endpoint so a
+        # "successful fetch that persists nothing" is visible without
+        # backend log access.
+        self.last_tick: dict[str, Any] = {}
         # Last notified notification level per schedule_id / course_code (monotonic guard).
         self._last_levels: dict[int | str, NotificationLevel | None] = {}
 
@@ -229,6 +250,11 @@ class AdaptivePoller:
         # Successful fetch: reset backoff state.
         self.consecutive_failures = 0
         self.last_success_at = datetime.now()
+        self.last_tick = {
+            "at": datetime.now().isoformat(timespec="seconds"),
+            "html_bytes": len(html),
+            "page_title": _page_title(html),
+        }
         # Keep the fetched HTML so per-meeting data can be parsed without
         # refetching (which would double-count the schedule fetch).
         self._last_schedule_html = html
@@ -236,9 +262,19 @@ class AdaptivePoller:
         # ticks froze open-presence state at whatever the first tick saw.
         self._last_dashboard_html = None
 
-        # Parse and persist the schedule.
-        items: list[ParsedScheduleItem] = parse_daily_schedule(html)
-        await self.repo.upsert_schedules(items)
+        # Parse and persist the schedule. A failure here used to crash the
+        # tick silently (APScheduler logged it while the health endpoint
+        # still reported the fetch as successful); record it instead so the
+        # health endpoint can show exactly where the cycle stopped.
+        try:
+            items: list[ParsedScheduleItem] = parse_daily_schedule(html)
+            self.last_tick["items"] = len(items)
+            await self.repo.upsert_schedules(items)
+            await self._sync_meetings_from_today(html)
+        except Exception as exc:  # noqa: BLE001 - recorded, not raised
+            logger.exception("schedule parse/persist failed")
+            self.last_tick["error"] = f"parse/persist: {exc}"
+            return
 
         # Sync per-meeting rows (official numbering, per-meeting lecturer,
         # dates, and Simkuliah status) from the same today-page matrix.
@@ -406,6 +442,7 @@ class AdaptivePoller:
         """
         try:
             courses = parse_meeting_matrix(html)
+            self.last_tick["matrix_courses"] = len(courses)
             if not courses:
                 return
 
@@ -426,8 +463,10 @@ class AdaptivePoller:
                             "simkuliah_status": meeting.status,
                         }
                     )
+            self.last_tick["meetings_synced"] = len(records)
             await self.repo.upsert_meetings(records)
         except Exception as exc:  # noqa: BLE001 - sync failure is non-fatal
+            self.last_tick["matrix_error"] = str(exc)
             logger.warning("meeting matrix sync failed: %s", exc)
 
     def _idle_interval(self) -> int:
