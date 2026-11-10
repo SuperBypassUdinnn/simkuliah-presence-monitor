@@ -80,6 +80,43 @@ Two desktop-Linux deliverables from owner feedback:
       ring + check) for tray/launcher contrast on dark and light panels;
       tray icon and hicolor 64/256/512 icons regenerated from it.
 
+## 2c. Follow-up Fixes (owner feedback, 2026-11-10, round 2)
+
+- [x] **Tray entry name**: measured live SNI properties of correct items
+      (steam, rustdesk) proved Plasma displays the SNI `Title` property.
+      The tray_manager Linux plugin's `setTitle` maps to
+      `app_indicator_set_label` (never rendered), so the displayed name
+      fell back to the id. `tray_manager` 0.5.3 is now vendored under
+      `client/third_party/tray_manager` (via `dependency_overrides`) with
+      one patched function: `set_title` calls `app_indicator_set_title`.
+      Verified live: `Title = Simkuliah Monitor`. Upstream `example/` is
+      dropped from the vendored copy.
+- [x] **Single-instance launch**: the Flutter Linux runner used
+      `G_APPLICATION_NON_UNIQUE`, so every launcher click spawned a new
+      process (and a new tray item). The runner now uses the unique
+      default (`G_APPLICATION_DEFAULT_FLAGS`; debug builds keep
+      non-unique so `flutter run` is not hijacked by an installed
+      instance) and `my_application_activate` re-presents the existing
+      window when one is already created (tray-hidden included).
+      Verified: `gtk-launch` while running leaves the instance count at 1.
+- [x] **Tray item id** renamed to the human-readable `Simkuliah Monitor`
+      (space-containing ids are valid — Kate registers as "Kate
+      Sessions"); it stays stable across restarts.
+- [x] **Pipeline**: `third_party` is excluded from the analyzer/formatter
+      pubspec discovery (vendored upstream code is not gated by this
+      project's linters) and `dart format` is scoped to `lib` and `test`.
+
+## 2d. Follow-up: badge logo everywhere (#34)
+
+- [x] Android launcher icons (`mipmap-*/ic_launcher.png`, 48/72/96/144/192
+      px) regenerated from the badge style — the phone previously showed
+      the default Flutter icon.
+- [x] Windows runner `app_icon.ico` regenerated (256/128/64/48/32/16).
+- [x] The in-app sidebar brand mark now uses the bundled badge logo asset
+      instead of the `Icons.school` placeholder.
+- Linux tray and hicolor launcher icons already used the badge style
+  (sections 2b/2c).
+
 ## 3. Design Notes
 
 - Hide-on-close is the only background mechanism: the Dart engine stays
