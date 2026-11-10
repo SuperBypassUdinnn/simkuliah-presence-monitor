@@ -7,8 +7,10 @@ import 'package:flutter/material.dart';
 
 import '../core/refresh_bus.dart';
 import '../models/meeting_model.dart';
+import '../services/backend_health_service.dart';
 import '../services/presence_service.dart';
 import 'widgets/active_lecture_card.dart';
+import 'widgets/error_state_view.dart';
 import 'widgets/gateway_alert_banner.dart';
 
 /// Today's feed: renders all of today's lecture meetings sorted by schedule
@@ -16,8 +18,13 @@ import 'widgets/gateway_alert_banner.dart';
 /// if not yet attended.
 class TodayFeedView extends StatefulWidget {
   final PresenceService? presenceService;
+  final BackendHealthService? backendHealthService;
 
-  const TodayFeedView({super.key, this.presenceService});
+  const TodayFeedView({
+    super.key,
+    this.presenceService,
+    this.backendHealthService,
+  });
 
   @override
   State<TodayFeedView> createState() => _TodayFeedViewState();
@@ -25,26 +32,49 @@ class TodayFeedView extends StatefulWidget {
 
 class _TodayFeedViewState extends State<TodayFeedView> {
   late final PresenceService _service;
+  late final BackendHealthService _healthService;
   StreamSubscription<void>? _refreshSub;
   List<MeetingModel>? _meetings;
   bool _loading = true;
   Object? _error;
   bool _fetchInFlight = false;
+  BackendHealthResult? _health;
+  DateTime? _lastHealthCheckAt;
 
   @override
   void initState() {
     super.initState();
     _service = widget.presenceService ?? PresenceService();
+    _healthService = widget.backendHealthService ?? BackendHealthService();
     unawaited(_load(silent: false));
-    _refreshSub = RefreshBus.instance.stream.listen(
-      (_) => unawaited(_load(silent: true)),
-    );
+    unawaited(_checkHealth());
+    _refreshSub = RefreshBus.instance.stream.listen((_) {
+      unawaited(_load(silent: true));
+      unawaited(_checkHealth());
+    });
   }
 
   @override
   void dispose() {
     unawaited(_refreshSub?.cancel());
     super.dispose();
+  }
+
+  /// Probe backend and Simkuliah health for the warning banner. Refresh-bus
+  /// events can fire in bursts, so rechecks are throttled to one per minute;
+  /// a probe never throws and failures just light the banner.
+  Future<void> _checkHealth() async {
+    final last = _lastHealthCheckAt;
+    if (last != null &&
+        DateTime.now().difference(last) < const Duration(minutes: 1)) {
+      return;
+    }
+    _lastHealthCheckAt = DateTime.now();
+    final result = await _healthService.check();
+    if (!mounted) return;
+    setState(() {
+      _health = result;
+    });
   }
 
   /// Fetch today's meetings. [silent] keeps any cached data on screen and
@@ -106,27 +136,10 @@ class _TodayFeedViewState extends State<TodayFeedView> {
       return const Center(child: CircularProgressIndicator());
     }
     if (_error != null && _meetings == null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.error_outline, size: 48, color: Colors.red),
-              const SizedBox(height: 12),
-              Text(
-                'Gagal memuat jadwal:\n$_error',
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 16),
-              FilledButton.icon(
-                icon: const Icon(Icons.refresh),
-                label: const Text('Coba Lagi'),
-                onPressed: () => unawaited(_load(silent: false)),
-              ),
-            ],
-          ),
-        ),
+      return ErrorStateView(
+        title: 'Gagal memuat jadwal',
+        error: _error,
+        onRetry: () => unawaited(_load(silent: false)),
       );
     }
     final meetings = _meetings ?? const <MeetingModel>[];
@@ -160,9 +173,15 @@ class _TodayFeedViewState extends State<TodayFeedView> {
         itemCount: meetings.length + 1,
         itemBuilder: (context, index) {
           if (index == 0) {
-            return const Padding(
-              padding: EdgeInsets.only(bottom: 12),
-              child: GatewayAlertBanner(hasOutage: false),
+            final health = _health;
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: health == null || health.status == BackendHealthStatus.ok
+                  ? const SizedBox.shrink()
+                  : GatewayAlertBanner(
+                      hasOutage: true,
+                      errorMessage: health.message,
+                    ),
             );
           }
           final meeting = meetings[index - 1];

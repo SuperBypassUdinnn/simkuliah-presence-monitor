@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/app_notification.dart';
+import '../../core/error_message.dart';
 import '../../core/override_style.dart';
 import '../../models/meeting_model.dart';
 import '../../services/presence_service.dart';
@@ -124,7 +125,7 @@ class _ActiveLectureCardState extends State<ActiveLectureCard> {
         AppNotification.show(
           context,
           title: 'Presensi Gagal',
-          message: 'Kehadiran tidak dapat dikonfirmasi: $error',
+          message: friendlyErrorMessage(error),
           color: Colors.red.shade600,
           icon: Icons.error_outline,
         );
@@ -174,7 +175,7 @@ class _ActiveLectureCardState extends State<ActiveLectureCard> {
         AppNotification.show(
           context,
           title: 'Gagal Menyimpan',
-          message: 'Keterangan mandiri tidak dapat disimpan: $error',
+          message: friendlyErrorMessage(error),
           color: Colors.red.shade600,
           icon: Icons.error_outline,
         );
@@ -255,7 +256,7 @@ class _ActiveLectureCardState extends State<ActiveLectureCard> {
         AppNotification.show(
           context,
           title: 'Gagal Membatalkan',
-          message: 'Keterangan mandiri tidak dapat dibatalkan: $error',
+          message: friendlyErrorMessage(error),
           color: Colors.red.shade600,
           icon: Icons.error_outline,
         );

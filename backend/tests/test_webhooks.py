@@ -189,3 +189,56 @@ async def test_health_endpoint():
     body = response.json()
     assert body["status"] == "ok"
     assert body["service"] == "simkuliah-presence-monitor"
+    # Offline test builds register a real AdaptivePoller with mock deps that
+    # never ran a tick, so the upstream status is "pending", not a failure.
+    assert body["simkuliah_status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_health_reports_degraded_while_simkuliah_failing():
+    from app.core import runtime
+    from app.services.poller import AdaptivePoller
+
+    original = runtime.get_poller()
+    poller = AdaptivePoller(
+        client=MagicMock(),
+        repo=MagicMock(),
+        dispatcher=MagicMock(),
+        scheduler=MagicMock(),
+    )
+    poller.consecutive_failures = 2
+    runtime.set_poller(poller)
+    try:
+        async with _client() as ac:
+            response = await ac.get("/api/v1/health")
+    finally:
+        runtime.set_poller(original)
+
+    assert response.status_code == 200
+    assert response.json()["simkuliah_status"] == "degraded"
+
+
+@pytest.mark.asyncio
+async def test_health_reports_ok_after_successful_sync():
+    from datetime import datetime
+
+    from app.core import runtime
+    from app.services.poller import AdaptivePoller
+
+    original = runtime.get_poller()
+    poller = AdaptivePoller(
+        client=MagicMock(),
+        repo=MagicMock(),
+        dispatcher=MagicMock(),
+        scheduler=MagicMock(),
+    )
+    poller.last_success_at = datetime.now()
+    runtime.set_poller(poller)
+    try:
+        async with _client() as ac:
+            response = await ac.get("/api/v1/health")
+    finally:
+        runtime.set_poller(original)
+
+    assert response.status_code == 200
+    assert response.json()["simkuliah_status"] == "ok"

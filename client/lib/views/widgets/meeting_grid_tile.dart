@@ -3,6 +3,8 @@
 /// Key Components: MeetingGridTile
 import 'package:flutter/material.dart';
 
+import '../../core/app_notification.dart';
+import '../../core/error_message.dart';
 import '../../core/override_style.dart';
 import '../../models/meeting_model.dart';
 import '../../services/presence_service.dart';
@@ -92,6 +94,9 @@ class MeetingGridTile extends StatelessWidget {
 
   void _showDetails(BuildContext context) {
     final service = presenceService ?? PresenceService();
+    // Captured for error notifications: the dialog builder's own context
+    // unmounts as soon as the dialog pops.
+    final viewContext = context;
     String? currentOverride = meeting.localOverride?['override_type']
         ?.toString()
         .toLowerCase();
@@ -210,25 +215,42 @@ class MeetingGridTile extends StatelessWidget {
 
                             if (confirmed != true || meeting.id <= 0) return;
 
-                            if (isCancel) {
-                              await service.clearOverride(
-                                meetingId: meeting.id,
-                              );
+                            try {
+                              if (isCancel) {
+                                await service.clearOverride(
+                                  meetingId: meeting.id,
+                                );
+                              } else {
+                                await service.submitOverride(
+                                  meetingId: meeting.id,
+                                  overrideType: type,
+                                );
+                              }
                               setDialogState(() {
-                                currentOverride = null;
+                                currentOverride = isCancel ? null : type;
                               });
-                            } else {
-                              await service.submitOverride(
-                                meetingId: meeting.id,
-                                overrideType: type,
-                              );
-                              setDialogState(() {
-                                currentOverride = type;
-                              });
-                            }
-                            if (context.mounted) {
-                              Navigator.of(dialogContext).pop();
-                              onOverrideChanged?.call();
+                              if (context.mounted) {
+                                Navigator.of(dialogContext).pop();
+                                onOverrideChanged?.call();
+                              }
+                            } catch (error) {
+                              // Surface the failure instead of swallowing it:
+                              // close the dialog first so the notification is
+                              // visible above the page.
+                              if (dialogContext.mounted) {
+                                Navigator.of(dialogContext).pop();
+                              }
+                              if (viewContext.mounted) {
+                                AppNotification.show(
+                                  viewContext,
+                                  title: isCancel
+                                      ? 'Gagal Membatalkan'
+                                      : 'Gagal Menyimpan',
+                                  message: friendlyErrorMessage(error),
+                                  color: Colors.red.shade600,
+                                  icon: Icons.error_outline,
+                                );
+                              }
                             }
                           },
                         );

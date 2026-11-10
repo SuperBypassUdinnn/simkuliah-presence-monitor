@@ -9,6 +9,7 @@ import '../core/refresh_bus.dart';
 import '../models/meeting_model.dart';
 import '../services/presence_service.dart';
 import 'widgets/active_lecture_card.dart';
+import 'widgets/error_state_view.dart';
 
 /// Active presence view: strictly displays lectures whose schedule is
 /// currently active today.
@@ -104,27 +105,10 @@ class _ActivePresenceViewState extends State<ActivePresenceView> {
       return const Center(child: CircularProgressIndicator());
     }
     if (_error != null && _meetings == null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.error_outline, size: 48, color: Colors.red),
-              const SizedBox(height: 12),
-              Text(
-                'Gagal memuat status presensi:\n$_error',
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 16),
-              FilledButton.icon(
-                icon: const Icon(Icons.refresh),
-                label: const Text('Coba Lagi'),
-                onPressed: () => unawaited(_load(silent: false)),
-              ),
-            ],
-          ),
-        ),
+      return ErrorStateView(
+        title: 'Gagal memuat status presensi',
+        error: _error,
+        onRetry: () => unawaited(_load(silent: false)),
       );
     }
 

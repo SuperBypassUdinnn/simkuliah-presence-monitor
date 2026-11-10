@@ -117,6 +117,9 @@ class AdaptivePoller:
         self.max_backoff_seconds = max_backoff_seconds
         # Consecutive fetch failures; drives exponential backoff.
         self.consecutive_failures: int = 0
+        # Completion time of the last successful sync cycle; surfaced by the
+        # health endpoint so clients can detect stale Simkuliah data.
+        self.last_success_at: datetime | None = None
         # Last notified notification level per schedule_id / course_code (monotonic guard).
         self._last_levels: dict[int | str, NotificationLevel | None] = {}
 
@@ -201,6 +204,7 @@ class AdaptivePoller:
 
         # Successful fetch: reset backoff state.
         self.consecutive_failures = 0
+        self.last_success_at = datetime.now()
         # Keep the fetched HTML so per-meeting data can be parsed without
         # refetching (which would double-count the schedule fetch).
         self._last_schedule_html = html
