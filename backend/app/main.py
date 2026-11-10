@@ -12,6 +12,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
 
 from app.api.router import router as api_router
+from app.core import runtime
 from app.core.database import DatabaseRepository
 from app.services.dispatcher import MultiDispatcher
 from app.services.fcm_service import create_fcm_dispatcher
@@ -56,8 +57,10 @@ def _build_poller() -> AdaptivePoller:
     )
 
 
-# Module-level poller singleton, reused by the lifespan on startup/shutdown.
+# Module-level poller singleton, reused by the lifespan on startup/shutdown
+# and read by the health router via app.core.runtime (no circular import).
 poller = _build_poller()
+runtime.set_poller(poller)
 
 
 @asynccontextmanager
