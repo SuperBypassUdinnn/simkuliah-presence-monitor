@@ -204,3 +204,11 @@ async def test_auth_async_context_manager_closes_client():
         pass
 
     auth.client.aclose.assert_awaited_once()
+
+
+def test_is_authenticated_reflects_cookie_jar():
+    client = SimkuliahClient(npm="2408107010053", password="secret")
+    # A fresh client has an empty in-memory cookie jar.
+    assert client.is_authenticated is False
+    client._client.cookies.set("ci_session", "session-token")
+    assert client.is_authenticated is True

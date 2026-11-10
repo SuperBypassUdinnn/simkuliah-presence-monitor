@@ -60,8 +60,8 @@ void main() {
               const BackendHealthResult(
                 status: BackendHealthStatus.simkuliahDegraded,
                 message:
-                    'Simkuliah sedang bermasalah - pembaruan status presensi '
-                    'tertunda. Data terakhir tetap ditampilkan.',
+                    'Sinkronisasi ke Simkuliah tertunda - status presensi mungkin '
+                    'tidak terbaru. Data terakhir tetap ditampilkan.',
               ),
             ),
           ),
@@ -70,7 +70,10 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('Simkuliah sedang bermasalah'), findsOneWidget);
+    expect(
+      find.textContaining('Sinkronisasi ke Simkuliah tertunda'),
+      findsOneWidget,
+    );
     // The feed itself still renders its meetings below the banner.
     expect(find.text('KECERDASAN ARTIFISIAL'), findsOneWidget);
   });
@@ -96,7 +99,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('KECERDASAN ARTIFISIAL'), findsOneWidget);
-    expect(find.textContaining('Simkuliah sedang bermasalah'), findsNothing);
+    expect(
+      find.textContaining('Sinkronisasi ke Simkuliah tertunda'),
+      findsNothing,
+    );
     expect(
       find.textContaining('Server pemantau tidak dapat dihubungi'),
       findsNothing,

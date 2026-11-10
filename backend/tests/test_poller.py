@@ -232,6 +232,113 @@ async def test_poller_tick_backoff_on_server_error(poller_deps):
 
 
 @pytest.mark.asyncio
+async def test_poller_tick_logs_in_when_sessionless(poller_deps):
+    """A fresh process has no ci_session; the tick must log in first."""
+    deps = poller_deps
+    deps["client"].is_authenticated = False
+
+    async def _login() -> bool:
+        # Real login sets the ci_session cookie in the client's jar.
+        deps["client"].is_authenticated = True
+        return True
+
+    deps["client"].login = AsyncMock(side_effect=_login)
+
+    with (
+        patch("app.services.poller.parse_daily_schedule", return_value=[]),
+        patch("app.services.poller.evaluate_notification_state", return_value=None),
+        patch("app.services.poller.asyncio.sleep", new_callable=AsyncMock),
+    ):
+        poller = AdaptivePoller(
+            client=deps["client"],
+            repo=deps["repo"],
+            dispatcher=deps["dispatcher"],
+            scheduler=deps["scheduler"],
+        )
+        await poller._tick()
+
+    deps["client"].login.assert_awaited_once()
+    deps["client"].fetch_today_schedule.assert_awaited_once()
+    deps["repo"].upsert_schedules.assert_awaited_once()
+    assert poller.consecutive_failures == 0
+
+
+@pytest.mark.asyncio
+async def test_poller_tick_recovers_after_stale_cookie_midcycle(poller_deps):
+    """A server-side-expired cookie still sits in the jar: the empty fetch
+    body must force a re-login and retry once instead of degrading."""
+    deps = poller_deps
+    deps["client"].is_authenticated = True
+    deps["client"].login = AsyncMock(return_value=True)
+    deps["client"].fetch_today_schedule = AsyncMock(side_effect=["", "<html>schedule</html>"])
+
+    with (
+        patch("app.services.poller.parse_daily_schedule", return_value=[]),
+        patch("app.services.poller.evaluate_notification_state", return_value=None),
+        patch("app.services.poller.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
+    ):
+        poller = AdaptivePoller(
+            client=deps["client"],
+            repo=deps["repo"],
+            dispatcher=deps["dispatcher"],
+            scheduler=deps["scheduler"],
+        )
+        await poller._tick()
+
+    deps["client"].login.assert_awaited_once()
+    assert deps["client"].fetch_today_schedule.await_count == 2
+    mock_sleep.assert_not_awaited()
+    deps["repo"].upsert_schedules.assert_awaited_once()
+    assert poller.consecutive_failures == 0
+
+
+@pytest.mark.asyncio
+async def test_poller_tick_backs_off_when_login_fails(poller_deps):
+    """Login failure must count a failure and skip the fetch entirely."""
+    deps = poller_deps
+    deps["client"].is_authenticated = False
+    deps["client"].login = AsyncMock(return_value=False)
+
+    with patch("app.services.poller.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+        poller = AdaptivePoller(
+            client=deps["client"],
+            repo=deps["repo"],
+            dispatcher=deps["dispatcher"],
+            scheduler=deps["scheduler"],
+            base_backoff_seconds=5,
+        )
+        await poller._tick()
+
+    deps["client"].fetch_today_schedule.assert_not_awaited()
+    deps["repo"].upsert_schedules.assert_not_awaited()
+    assert poller.consecutive_failures == 1
+    mock_sleep.assert_awaited_once_with(5)
+
+
+@pytest.mark.asyncio
+async def test_poller_tick_does_not_login_when_authenticated(poller_deps):
+    """A healthy session must not burn a CAPTCHA login on every tick."""
+    deps = poller_deps
+    deps["client"].is_authenticated = True
+
+    with (
+        patch("app.services.poller.parse_daily_schedule", return_value=[]),
+        patch("app.services.poller.evaluate_notification_state", return_value=None),
+        patch("app.services.poller.asyncio.sleep", new_callable=AsyncMock),
+    ):
+        poller = AdaptivePoller(
+            client=deps["client"],
+            repo=deps["repo"],
+            dispatcher=deps["dispatcher"],
+            scheduler=deps["scheduler"],
+        )
+        await poller._tick()
+
+    deps["client"].login.assert_not_awaited()
+    deps["client"].fetch_today_schedule.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_poller_start_and_stop(poller_deps):
     deps = poller_deps
     poller = AdaptivePoller(

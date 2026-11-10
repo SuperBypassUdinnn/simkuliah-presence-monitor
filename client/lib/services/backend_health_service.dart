@@ -121,8 +121,8 @@ class BackendHealthService {
 }
 
 const String _simkuliahDegradedMessage =
-    'Simkuliah sedang bermasalah - pembaruan status presensi tertunda. '
-    'Data terakhir tetap ditampilkan.';
+    'Sinkronisasi ke Simkuliah tertunda - status presensi mungkin tidak '
+    'terbaru. Data terakhir tetap ditampilkan.';
 
 const String _backendDownMessage =
     'Server pemantau tidak dapat dihubungi - data mungkin tidak diperbarui. '

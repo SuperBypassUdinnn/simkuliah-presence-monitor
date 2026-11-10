@@ -68,7 +68,7 @@ void main() {
     final result = await service.check();
 
     expect(result.status, BackendHealthStatus.simkuliahDegraded);
-    expect(result.message, contains('Simkuliah sedang bermasalah'));
+    expect(result.message, contains('Sinkronisasi ke Simkuliah tertunda'));
   });
 
   test('server 5xx reports the backend down banner', () async {
