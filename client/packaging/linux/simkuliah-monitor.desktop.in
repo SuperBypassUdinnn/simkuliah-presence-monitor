@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Simkuliah Monitor
+GenericName=Presence Monitor
+Comment=Pantau jendela presensi Simkuliah secara realtime
+Exec=@APP_DIR@/simkuliah_client
+Icon=simkuliah-monitor
+Terminal=false
+Categories=Network;
+StartupWMClass=com.superbypassudin.simkuliah_monitor
+Keywords=simkuliah;presensi;kuliah;monitor;
+X-GNOME-UsesNotifications=true

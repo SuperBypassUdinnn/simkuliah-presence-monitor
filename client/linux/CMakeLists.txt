@@ -7,7 +7,7 @@ project(runner LANGUAGES CXX)
 set(BINARY_NAME "simkuliah_client")
 # The unique GTK application identifier for this application. See:
 # https://wiki.gnome.org/HowDoI/ChooseApplicationID
-set(APPLICATION_ID "com.example.simkuliah_client")
+set(APPLICATION_ID "com.superbypassudin.simkuliah_monitor")
 
 # Explicitly opt in to modern CMake behaviors to avoid warnings with recent
 # versions of CMake.
@@ -73,6 +73,15 @@ set_target_properties(${BINARY_NAME}
 # Generated plugin build rules, which manage building the plugins and adding
 # them to the application.
 include(flutter/generated_plugins.cmake)
+
+# libayatana-appindicator >= 0.6 deprecates app_indicator_new and friends,
+# which tray_manager 0.5.3 still calls; its plugin target would fail under
+# the -Werror applied by APPLY_STANDARD_SETTINGS. Compile only that
+# third-party target with deprecation warnings off until the package
+# migrates (no behavioral impact).
+if(TARGET tray_manager_plugin)
+  target_compile_options(tray_manager_plugin PRIVATE "-Wno-deprecated-declarations")
+endif()
 
 
 # === Installation ===

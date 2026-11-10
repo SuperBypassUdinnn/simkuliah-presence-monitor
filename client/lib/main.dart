@@ -1,11 +1,14 @@
-/// Purpose: Flutter client application entrypoint with responsive sidebar navigation and auto-refresh on focus.
-/// Data & Logic Flow: Initializes widget tree, theme configurations, and root layout with tab focus auto-refresh; desktop additionally runs a realtime in-app alert service.
+/// Purpose: Flutter client application entrypoint with responsive sidebar navigation, auto-refresh on focus, and desktop background operation.
+/// Data & Logic Flow: Initializes widget tree, theme configurations, and root layout with tab focus auto-refresh; desktop additionally runs a realtime in-app alert service, hides to the system tray on window close, and keeps polling while hidden.
 /// Key Components: SimkuliahApp, MainHomeScreen
 import 'dart:async';
-import 'dart:io' show Platform;
+import 'dart:io' show File, Platform;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:tray_manager/tray_manager.dart';
+import 'package:window_manager/window_manager.dart';
 
 import 'core/app_notification.dart';
 import 'core/firebase_config.dart';
@@ -29,6 +32,17 @@ Future<void> main() async {
     await PushNotificationService.instance.initialize();
   } catch (e) {
     debugPrint('Push notification note: $e');
+  }
+  if (!kIsWeb && (Platform.isLinux || Platform.isWindows)) {
+    // Desktop window management: initialize before runApp so hide-on-close
+    // and tray behavior can attach to the native window.
+    await windowManager.ensureInitialized();
+    await windowManager.waitUntilReadyToShow(
+      const WindowOptions(title: 'Simkuliah Monitor'),
+      () async {
+        await windowManager.show();
+      },
+    );
   }
   runApp(const SimkuliahApp());
 }
@@ -68,9 +82,18 @@ class MainHomeScreen extends StatefulWidget {
 }
 
 class _MainHomeScreenState extends State<MainHomeScreen>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, WindowListener, TrayListener {
   int _currentIndex = 0;
   RealtimeAlertService? _alertService;
+
+  /// Stable StatusNotifierItem id. Plasma keys per-app tray settings
+  /// (System Tray > Entries) by this id, so it must survive restarts and
+  /// match APPLICATION_ID in linux/CMakeLists.txt and the .desktop entry.
+  static const String _trayItemId = 'com.superbypassudin.simkuliah_monitor';
+
+  /// Direct handle to the tray_manager plugin channel; see
+  /// _setupDesktopBackground for why setIcon bypasses the package wrapper.
+  static const MethodChannel _trayChannel = MethodChannel('tray_manager');
 
   @override
   void initState() {
@@ -89,6 +112,99 @@ class _MainHomeScreenState extends State<MainHomeScreen>
           _alertService = service;
         });
       });
+    }
+    if (!kIsWeb && (Platform.isLinux || Platform.isWindows)) {
+      unawaited(_setupDesktopBackground());
+    }
+  }
+
+  /// Enable background operation: the window close button hides the app to
+  /// the system tray instead of quitting, so the realtime alert service
+  /// keeps polling while hidden. Real exit happens via the tray menu.
+  Future<void> _setupDesktopBackground() async {
+    windowManager.addListener(this);
+    trayManager.addListener(this);
+    await windowManager.setPreventClose(true);
+    final iconPath = _trayIconPath();
+    if (iconPath != null) {
+      // Invoke the plugin channel directly instead of trayManager.setIcon:
+      // the wrapper hardcodes 'id': shortid.generate(), so the
+      // StatusNotifierItem id would be random per process and Plasma would
+      // forget the user's tray visibility choice on every restart.
+      await _trayChannel.invokeMethod<dynamic>('setIcon', <String, dynamic>{
+        'id': _trayItemId,
+        'iconPath': iconPath,
+        'isTemplate': false,
+        'iconPosition': 'left',
+        'iconSize': 18,
+      });
+    }
+    // The Linux (appindicator) plugin implements setIcon/setTitle/
+    // setContextMenu only: no tooltip support, and right-click pops the
+    // menu up natively.
+    if (Platform.isWindows) {
+      await trayManager.setToolTip('Simkuliah Monitor');
+    }
+    if (Platform.isLinux) {
+      // Human-readable name for the tray entry instead of the raw id.
+      await trayManager.setTitle('Simkuliah Monitor');
+    }
+    await trayManager.setContextMenu(
+      Menu(
+        items: [
+          MenuItem(key: 'show', label: 'Buka Simkuliah Monitor'),
+          MenuItem.separator(),
+          MenuItem(key: 'exit', label: 'Keluar'),
+        ],
+      ),
+    );
+  }
+
+  /// AppIndicator on Linux needs an absolute icon file path; resolve the
+  /// bundled asset next to the executable (bundle/data/flutter_assets
+  /// layout shared by Linux and Windows builds).
+  String? _trayIconPath() {
+    try {
+      final exeDir = File(Platform.resolvedExecutable).parent.path;
+      final iconPath = '$exeDir/data/flutter_assets/assets/icons/tray_icon.png';
+      if (File(iconPath).existsSync()) {
+        return iconPath;
+      }
+    } catch (_) {
+      // Fall through to the null case (tray without a custom icon).
+    }
+    return null;
+  }
+
+  @override
+  void onWindowClose() async {
+    // Keep running in the tray; the realtime alert service stays active.
+    await windowManager.hide();
+  }
+
+  @override
+  void onTrayIconMouseDown() {
+    windowManager.show();
+    windowManager.focus();
+  }
+
+  @override
+  void onTrayIconRightMouseDown() {
+    // Linux pops the context menu natively via appindicator; only Windows
+    // needs the explicit pop-up call.
+    if (Platform.isWindows) {
+      trayManager.popUpContextMenu();
+    }
+  }
+
+  @override
+  void onTrayMenuItemClick(MenuItem menuItem) {
+    switch (menuItem.key) {
+      case 'show':
+        windowManager.show();
+        windowManager.focus();
+      case 'exit':
+        windowManager.destroy();
     }
   }
 
@@ -112,6 +228,10 @@ class _MainHomeScreenState extends State<MainHomeScreen>
   void dispose() {
     unawaited(_alertService?.stop());
     WidgetsBinding.instance.removeObserver(this);
+    if (!kIsWeb && (Platform.isLinux || Platform.isWindows)) {
+      windowManager.removeListener(this);
+      trayManager.removeListener(this);
+    }
     super.dispose();
   }
 
