@@ -185,6 +185,12 @@ class AdaptivePoller:
 
     async def _tick(self) -> None:
         """Run a single polling cycle."""
+        if not await self._ensure_session():
+            # No session and login failed: back off and retry next tick.
+            self.consecutive_failures += 1
+            await asyncio.sleep(self._current_backoff_seconds())
+            return
+
         # Fetch today's schedule, backing off exponentially on server errors.
         html = ""
         try:
@@ -194,6 +200,24 @@ class AdaptivePoller:
             self.consecutive_failures += 1
             await asyncio.sleep(self._current_backoff_seconds())
             return
+
+        if not html:
+            # Empty body is either a genuine 500/502/504 server error or a
+            # sessionless 307 redirect to the login page (which carries an
+            # empty body): re-authenticate unconditionally and retry once
+            # before counting a failure. A lost or stale session recovers
+            # here; a real server outage fails again and backs off below.
+            if not await self._ensure_session(force=True):
+                self.consecutive_failures += 1
+                await asyncio.sleep(self._current_backoff_seconds())
+                return
+            try:
+                html = await self.client.fetch_today_schedule()
+            except Exception as exc:  # noqa: BLE001 - network failure backs off
+                logger.warning("schedule fetch failed: %s", exc)
+                self.consecutive_failures += 1
+                await asyncio.sleep(self._current_backoff_seconds())
+                return
 
         if not html:
             # Empty body indicates a 500/502/504 server error from the client.
@@ -348,6 +372,26 @@ class AdaptivePoller:
     # ------------------------------------------------------------------ #
     # Internal helpers
     # ------------------------------------------------------------------ #
+
+    async def _ensure_session(self, *, force: bool = False) -> bool:
+        """Establish a Simkuliah session, by default only when one is missing.
+
+        The ``ci_session`` cookie lives only in the client's in-memory jar,
+        so every deploy or restart starts sessionless; without an explicit
+        login every fetch 307-redirects to the login page (empty body) and
+        the poller degrades forever. Mock clients expose no real cookie
+        jar, so the default is to treat them as authenticated. ``force``
+        re-authenticates even when a cookie is present, because a cookie
+        can be stale after the server expired it.
+        """
+        if not force and getattr(self.client, "is_authenticated", True):
+            return True
+        logger.info("logging in to simkuliah")
+        try:
+            return await self.client.login()
+        except Exception as exc:  # noqa: BLE001 - login failure backs off
+            logger.warning("simkuliah login failed: %s", exc)
+            return False
 
     async def _sync_meetings_from_today(self, html: str) -> None:
         """Upsert per-meeting rows from the today-page meeting matrix.

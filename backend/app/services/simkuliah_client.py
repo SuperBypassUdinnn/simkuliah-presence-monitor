@@ -127,6 +127,15 @@ class SimkuliahClient:
     # Public API
     # ------------------------------------------------------------------ #
 
+    @property
+    def is_authenticated(self) -> bool:
+        """True when the cookie jar holds a ``ci_session`` cookie.
+
+        The jar is in-memory, so this is False on every fresh process (right
+        after a deploy or restart) until :meth:`login` succeeds.
+        """
+        return _SESSION_COOKIE_NAME in self._client.cookies
+
     async def login(self) -> bool:
         """Authenticate against Simkuliah with up to 3 CAPTCHA retry attempts.
 
