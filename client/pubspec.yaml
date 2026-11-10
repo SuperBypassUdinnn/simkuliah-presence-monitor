@@ -1,6 +1,9 @@
 name: simkuliah_client
 description: Simkuliah Monitor - multi-platform Flutter client for the Simkuliah presence monitor.
 publish_to: 'none'
+# versionCode bumps with every release build: the phone refuses to install
+# an APK whose versionCode is not higher than the installed one.
+version: 1.0.3+2
 
 environment:
   sdk: ">=3.13.0 <4.0.0"
