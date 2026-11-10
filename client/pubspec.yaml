@@ -16,6 +16,16 @@ dependencies:
   supabase_flutter: ^2.5.2
   tray_manager: ">=0.2.0 <0.7.0"
   window_manager: ">=0.4.0 <0.6.0"
+
+dependency_overrides:
+  # Vendored tray_manager 0.5.3 with one patched function: the Linux plugin
+  # maps setTitle to the appindicator label, but Plasma displays the SNI
+  # Title property, which only app_indicator_set_title sets. The vendored
+  # copy lives in third_party/tray_manager (see the patch note in
+  # linux/tray_manager_plugin.cc there).
+  tray_manager:
+    path: third_party/tray_manager
+
 dev_dependencies:
   flutter_lints: ^6.0.0
   flutter_test:

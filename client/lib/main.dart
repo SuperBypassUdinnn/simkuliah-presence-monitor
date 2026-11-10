@@ -86,10 +86,11 @@ class _MainHomeScreenState extends State<MainHomeScreen>
   int _currentIndex = 0;
   RealtimeAlertService? _alertService;
 
-  /// Stable StatusNotifierItem id. Plasma keys per-app tray settings
-  /// (System Tray > Entries) by this id, so it must survive restarts and
-  /// match APPLICATION_ID in linux/CMakeLists.txt and the .desktop entry.
-  static const String _trayItemId = 'com.superbypassudin.simkuliah_monitor';
+  /// Stable, human-readable StatusNotifierItem id. Plasma keys the per-app
+  /// tray settings (System Tray > Entries) by this id, so it must be stable
+  /// across restarts, and Plasma displays the item under this name. A
+  /// space-containing id is valid: e.g. Kate registers as "Kate Sessions".
+  static const String _trayItemId = 'Simkuliah Monitor';
 
   /// Direct handle to the tray_manager plugin channel; see
   /// _setupDesktopBackground for why setIcon bypasses the package wrapper.
@@ -146,8 +147,9 @@ class _MainHomeScreenState extends State<MainHomeScreen>
       await trayManager.setToolTip('Simkuliah Monitor');
     }
     if (Platform.isLinux) {
-      // Human-readable name for the tray entry instead of the raw id.
-      await trayManager.setTitle('Simkuliah Monitor');
+      // The vendored plugin maps setTitle to app_indicator_set_title, i.e.
+      // the SNI Title property Plasma displays as the tray entry name.
+      await trayManager.setTitle(_trayItemId);
     }
     await trayManager.setContextMenu(
       Menu(
@@ -336,10 +338,10 @@ class _MainHomeScreenState extends State<MainHomeScreen>
                     color: theme.colorScheme.primary,
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Icon(
-                    Icons.school,
-                    color: Colors.white,
-                    size: 24,
+                  child: Image.asset(
+                    'assets/icons/tray_icon.png',
+                    width: 24,
+                    height: 24,
                   ),
                 ),
                 const SizedBox(width: 12),
