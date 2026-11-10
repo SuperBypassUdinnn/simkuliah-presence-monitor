@@ -1,5 +1,5 @@
-/// Purpose: Semester matrix table view displaying all courses and 16 meeting tiles horizontally.
-/// Data & Logic Flow: Fetches semester schedules with nested meetings, renders interactive matrix cells, and silently refetches on refresh-bus events.
+/// Purpose: Semester matrix table view displaying all courses and their meeting tiles on a shared 16-column grid.
+/// Data & Logic Flow: Fetches semester schedules with nested meetings, sizes each row by its real Simkuliah semester length, renders interactive matrix cells, and silently refetches on refresh-bus events.
 /// Key Components: SemesterMatrixView
 import 'dart:async';
 
@@ -13,8 +13,11 @@ import 'widgets/meeting_grid_tile.dart';
 
 export 'widgets/meeting_grid_tile.dart';
 
-/// Semester presence matrix view: displays all semester courses and their 16
-/// meetings arranged horizontally in a clean matrix table, matching Simkuliah portal.
+/// Semester presence matrix view: displays all semester courses and their
+/// meetings arranged horizontally in a clean matrix table, matching Simkuliah
+/// portal. Courses whose Simkuliah matrix is shorter than 16 meetings (e.g.
+/// praktikum courses ending at 12) render their out-of-range columns as
+/// neutral empty slots so every row still spans the same grid.
 class SemesterMatrixView extends StatefulWidget {
   final bool testMode;
   final PresenceService? presenceService;
@@ -123,10 +126,10 @@ class _SemesterMatrixViewState extends State<SemesterMatrixView> {
     });
   }
 
-  double _attendancePercentage(List<MeetingModel> meetings) {
-    if (meetings.isEmpty) return 0.0;
+  double _attendancePercentage(List<MeetingModel> meetings, int total) {
+    if (meetings.isEmpty || total <= 0) return 0.0;
     final attended = meetings.where((m) => m.isAttended).length;
-    return attended / _meetingsPerCourse;
+    return attended / total;
   }
 
   Widget _buildTableHeader(BuildContext context) {
@@ -179,8 +182,22 @@ class _SemesterMatrixViewState extends State<SemesterMatrixView> {
       byNumber[meeting.meetingNumber] = meeting;
     }
 
-    final meetings = List.generate(_meetingsPerCourse, (index) {
+    // Simkuliah publishes each course's full semester column set up front:
+    // theory courses span 16 meetings while praktikum courses end at 12.
+    // The highest synced meeting number is therefore that course's real
+    // semester length; columns beyond it do not exist for the course and
+    // render as neutral empty slots so every row still spans the same
+    // 16-column grid as the header.
+    final syncedMax = course.meetings.fold<int>(
+      0,
+      (maxNumber, meeting) =>
+          meeting.meetingNumber > maxNumber ? meeting.meetingNumber : maxNumber,
+    );
+    final semesterLength = syncedMax == 0 ? _meetingsPerCourse : syncedMax;
+
+    final meetings = List<MeetingModel?>.generate(_meetingsPerCourse, (index) {
       final number = index + 1;
+      if (number > semesterLength) return null;
       return byNumber[number] ??
           MeetingModel(
             id: 0,
@@ -197,8 +214,9 @@ class _SemesterMatrixViewState extends State<SemesterMatrixView> {
           );
     });
 
-    final percentage = _attendancePercentage(meetings);
-    final attendedCount = meetings.where((m) => m.isAttended).length;
+    final realMeetings = meetings.whereType<MeetingModel>().toList();
+    final percentage = _attendancePercentage(realMeetings, semesterLength);
+    final attendedCount = realMeetings.where((m) => m.isAttended).length;
     final isPassing = percentage >= _attendanceThreshold;
 
     return Container(
@@ -239,12 +257,21 @@ class _SemesterMatrixViewState extends State<SemesterMatrixView> {
             return Container(
               width: 38,
               alignment: Alignment.center,
-              child: MeetingGridTile(
-                meeting: m,
-                compact: true,
-                presenceService: _service,
-                onOverrideChanged: () => unawaited(_loadMatrix(silent: true)),
-              ),
+              child: m == null
+                  ? Text(
+                      '–',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade600.withValues(alpha: 0.4),
+                      ),
+                    )
+                  : MeetingGridTile(
+                      meeting: m,
+                      compact: true,
+                      presenceService: _service,
+                      onOverrideChanged: () =>
+                          unawaited(_loadMatrix(silent: true)),
+                    ),
             );
           }),
           const SizedBox(width: 12),
@@ -257,12 +284,18 @@ class _SemesterMatrixViewState extends State<SemesterMatrixView> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      '$attendedCount/$_meetingsPerCourse hadir',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: isPassing ? Colors.green : Colors.orange,
+                    // Flexible so a long recap (or an enlarged system text
+                    // scale) truncates instead of overflowing the 150px
+                    // recap column.
+                    Flexible(
+                      child: Text(
+                        '$attendedCount/$semesterLength hadir',
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: isPassing ? Colors.green : Colors.orange,
+                        ),
                       ),
                     ),
                     Text(
