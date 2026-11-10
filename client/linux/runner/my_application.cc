@@ -7,9 +7,14 @@
 
 #include "flutter/generated_plugin_registrant.h"
 
+// Purpose: GTK application runner for the Linux desktop build.
+// Data & Logic Flow: Creates the single application window hosting the Flutter view; second launches forward activation to the running instance and re-present its window (tray-hidden included).
+// Key Components: MyApplication (unique GApplication, single window)
+
 struct _MyApplication {
   GtkApplication parent_instance;
   char** dart_entrypoint_arguments;
+  GtkWindow* first_window;
 };
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
@@ -19,11 +24,30 @@ static void first_frame_cb(MyApplication* self, FlView* view) {
   gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
 }
 
+// Called when the single application window is destroyed; keeps the
+// activate guard from presenting a dangling window.
+static void window_destroy_cb(GtkWidget* widget, MyApplication* self) {
+  self->first_window = nullptr;
+}
+
 // Implements GApplication::activate.
 static void my_application_activate(GApplication* application) {
   MyApplication* self = MY_APPLICATION(application);
+
+  // Single-instance activation: with a unique GApplication, a second launch
+  // forwards "activate" to the running instance (possibly hidden in the
+  // tray); re-show the existing window instead of creating another Flutter
+  // view.
+  if (self->first_window != nullptr) {
+    gtk_widget_show(GTK_WIDGET(self->first_window));
+    gtk_window_present(self->first_window);
+    return;
+  }
+
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
+  self->first_window = window;
+  g_signal_connect(window, "destroy", G_CALLBACK(window_destroy_cb), self);
 
   // Use a header bar when running in GNOME as this is the common style used
   // by applications and is the setup most users will be using (e.g. Ubuntu
@@ -137,7 +161,9 @@ static void my_application_class_init(MyApplicationClass* klass) {
   G_OBJECT_CLASS(klass)->dispose = my_application_dispose;
 }
 
-static void my_application_init(MyApplication* self) {}
+static void my_application_init(MyApplication* self) {
+  self->first_window = nullptr;
+}
 
 MyApplication* my_application_new() {
   // Set the program name to the application ID, which helps various systems
@@ -146,7 +172,15 @@ MyApplication* my_application_new() {
   // the application to be recognized beyond its binary name.
   g_set_prgname(APPLICATION_ID);
 
+  // Default (unique) GApplication flags make a second launch forward its
+  // activation to the running instance; see my_application_activate. Debug
+  // builds (flutter run) stay non-unique so a running installed instance
+  // does not hijack the dev session.
+  GApplicationFlags flags = G_APPLICATION_DEFAULT_FLAGS;
+#ifndef NDEBUG
+  flags = G_APPLICATION_NON_UNIQUE;
+#endif
   return MY_APPLICATION(g_object_new(my_application_get_type(),
                                      "application-id", APPLICATION_ID, "flags",
-                                     G_APPLICATION_NON_UNIQUE, nullptr));
+                                     flags, nullptr));
 }

@@ -60,7 +60,13 @@ def main() -> int:
         run_check(pytest_cmd, cwd=Path("backend"), name="pytest (backend)")
 
     # Flutter checks
-    pubspecs = [p for p in Path(".").glob("**/pubspec.yaml") if ".git" not in p.parts]
+    # Vendored third-party packages (client/third_party) are upstream code;
+    # they are not gated by this project's analyzer and formatter.
+    pubspecs = [
+        p
+        for p in Path(".").glob("**/pubspec.yaml")
+        if ".git" not in p.parts and "third_party" not in p.parts
+    ]
     for pdir in pubspecs:
         workdir = pdir.parent
         pkg_config = workdir / ".dart_tool" / "package_config.json"
@@ -74,8 +80,17 @@ def main() -> int:
                 name=f"flutter analyze ({workdir})",
             )
         if shutil.which("dart"):
+            # First-party Dart only (lib, test); vendored third_party
+            # packages are upstream code and are not formatter-gated.
             run_check(
-                ["dart", "format", "--output=none", "--set-exit-if-changed", "."],
+                [
+                    "dart",
+                    "format",
+                    "--output=none",
+                    "--set-exit-if-changed",
+                    "lib",
+                    "test",
+                ],
                 cwd=workdir,
                 name=f"dart format ({workdir})",
             )
