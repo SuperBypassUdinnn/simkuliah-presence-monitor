@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Simkuliah Monitor
+GenericName=Presence Monitor
+Comment=Jalankan Simkuliah Monitor saat sesi dimulai (tersembunyi di tray)
+Exec=@AUTOSTART_EXEC@ --hidden
+Icon=simkuliah-monitor
+Terminal=false
+X-GNOME-Autostart-enabled=true

@@ -21,8 +21,9 @@ import 'views/active_presence_view.dart';
 import 'views/semester_matrix_view.dart';
 import 'views/today_feed_view.dart';
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  final startHidden = args.contains('--hidden');
   try {
     await SupabaseConfig.initialize();
   } catch (e) {
@@ -42,12 +43,16 @@ Future<void> main() async {
   }
   if (!kIsWeb && (Platform.isLinux || Platform.isWindows)) {
     // Desktop window management: initialize before runApp so hide-on-close
-    // and tray behavior can attach to the native window.
+    // and tray behavior can attach to the native window. With --hidden
+    // (autostart) the window stays hidden; the tray icon appears and a
+    // launcher click presents it through single-instance activation.
     await windowManager.ensureInitialized();
     await windowManager.waitUntilReadyToShow(
       const WindowOptions(title: 'Simkuliah Monitor'),
       () async {
-        await windowManager.show();
+        if (!startHidden) {
+          await windowManager.show();
+        }
       },
     );
   }
