@@ -19,9 +19,26 @@ struct _MyApplication {
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
 
+// Returns TRUE when dart_entrypoint_arguments contains the given flag.
+static gboolean my_application_has_arg(MyApplication* self, const char* flag) {
+  if (self->dart_entrypoint_arguments == nullptr) {
+    return FALSE;
+  }
+  for (int i = 0; self->dart_entrypoint_arguments[i] != nullptr; i++) {
+    if (g_strcmp0(self->dart_entrypoint_arguments[i], flag) == 0) {
+      return TRUE;
+    }
+  }
+  return FALSE;
+}
+
 // Called when first Flutter frame received.
 static void first_frame_cb(MyApplication* self, FlView* view) {
-  gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
+  // Started with --hidden (autostart): keep the window hidden; the tray
+  // icon appears and a later launcher click presents the window.
+  if (!my_application_has_arg(self, "--hidden")) {
+    gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
+  }
 }
 
 // Called when the single application window is destroyed; keeps the

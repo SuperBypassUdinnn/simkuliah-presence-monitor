@@ -19,6 +19,7 @@ install-bundle.sh - install the Simkuliah Monitor Linux bundle as a desktop app
 
 Usage:
   install-bundle.sh [OPTIONS] [BUNDLE_DIR]
+  install-bundle.sh autostart install|uninstall
   install-bundle.sh completions bash|fish
   install-bundle.sh completions install [--fish|--bash|--uninstall]
 
@@ -31,13 +32,27 @@ Options:
   -h, --help    show this help
 
 Subcommands:
+  autostart     install or remove the login autostart entry (hidden to tray)
   completions   emit or install shell completion
   help          show detailed help for a subcommand
 
 Examples:
   install-bundle.sh
   install-bundle.sh ~/builds/simkuliah-bundle
+  install-bundle.sh autostart install
   install-bundle.sh --uninstall
+EOF
+}
+
+usage_autostart() {
+  cat <<'EOF'
+Usage: install-bundle.sh autostart install|uninstall
+
+Install or remove the login autostart entry. The entry launches the
+installed bundle with --hidden, so the app starts silently in the system
+tray at session start. When ~/.scripts/autostart-env exists, Exec is
+wrapped with it so the app only starts after the Wayland compositor
+socket is available.
 EOF
 }
 
@@ -118,6 +133,63 @@ do_uninstall() {
     update-desktop-database "$data_dir/applications" 2>/dev/null || true
   fi
   printf 'removed %s\n' "$APP_NAME"
+}
+
+do_autostart_install() {
+  local data_dir="${XDG_DATA_HOME:-$HOME/.local/share}"
+  local app_dir="$data_dir/$APP_NAME"
+  local autostart_dir="${XDG_CONFIG_HOME:-$HOME/.config}/autostart"
+  local dst="$autostart_dir/$APP_NAME-autostart.desktop"
+
+  if [ ! -x "$app_dir/$BIN_NAME" ]; then
+    printf 'install-bundle.sh: bundle not installed yet; run install first\n' >&2
+    exit 1
+  fi
+
+  # Each Exec component is quoted so a home or bundle path containing spaces
+  # still parses as one argument under the xdg Exec rules.
+  local exec_cmd
+  if [ -x "$HOME/.scripts/autostart-env" ]; then
+    # Wayland session guard: waits for the compositor socket before exec,
+    # since the session may reach autostart before wayland-N exists.
+    exec_cmd="\"$HOME/.scripts/autostart-env\" \"$app_dir/$BIN_NAME\""
+  else
+    exec_cmd="\"$app_dir/$BIN_NAME\""
+  fi
+
+  mkdir -p "$autostart_dir"
+  # Split around the placeholder and concatenate, so no substitution engine
+  # (sed or bash's pattern replacement, both of which treat & specially)
+  # can mangle a path that contains reserved characters.
+  local template before after
+  template=$(cat "$PACKAGING_DIR/$APP_NAME-autostart.desktop.in")
+  before=${template%%@AUTOSTART_EXEC@*}
+  after=${template#*@AUTOSTART_EXEC@}
+  printf '%s%s%s\n' "$before" "$exec_cmd" "$after" > "$dst"
+  printf 'installed autostart  %s\n' "$dst"
+}
+
+do_autostart_uninstall() {
+  local autostart_dir="${XDG_CONFIG_HOME:-$HOME/.config}/autostart"
+  rm -f "$autostart_dir/$APP_NAME-autostart.desktop"
+  printf 'removed autostart entry\n'
+}
+
+cmd_autostart() {
+  case "${1:-}" in
+    install) do_autostart_install ;;
+    uninstall) do_autostart_uninstall ;;
+    -h|--help) usage_autostart ;;
+    "")
+      usage_autostart >&2
+      return 1
+      ;;
+    *)
+      printf 'install-bundle.sh: autostart: unknown action: %s\n' "$1" >&2
+      usage_autostart >&2
+      return 1
+      ;;
+  esac
 }
 
 emit_bash_completion() {
@@ -265,6 +337,7 @@ cmd___complete() { # words... partial -> candidate<TAB>description lines for par
   fi
 
   if [ -z "$first" ]; then
+    printf 'autostart\tinstall or remove the login autostart entry\n'
     printf 'completions\tinstall or print shell completions\n'
     printf 'help\tshow detailed help for a subcommand\n'
     printf -- '--uninstall\tremove the installed application files\n'
@@ -279,8 +352,15 @@ cmd___complete() { # words... partial -> candidate<TAB>description lines for par
         printf 'install\tinstall completions for the primary shell\n'
       fi
       ;;
+    autostart)
+      if [ "$prev" = autostart ]; then
+        printf 'install\tinstall the autostart entry\n'
+        printf 'uninstall\tremove the autostart entry\n'
+      fi
+      ;;
     help)
       if [ "$prev" = help ]; then
+        printf 'autostart\tautostart subcommand help\n'
         printf 'completions\tcompletion subcommand help\n'
       fi
       ;;
@@ -303,9 +383,14 @@ main() {
       shift
       cmd_completions "$@"
       ;;
+    autostart)
+      shift
+      cmd_autostart "$@"
+      ;;
     help)
       case "${2:-}" in
         completions) usage_completions ;;
+        autostart) usage_autostart ;;
         *) usage ;;
       esac
       ;;
