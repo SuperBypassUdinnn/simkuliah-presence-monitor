@@ -94,4 +94,36 @@ void main() {
     expect(lupaAbsen.effectiveStatus, 'Lupa Absen');
     expect(dosenTidakAbsen.effectiveStatus, 'Dosen Tidak Absen');
   });
+
+  test('MeetingModel renders schedule times as HH:mm without seconds', () {
+    final meeting = MeetingModel.fromJson({
+      'id': 30,
+      'meeting_number': 4,
+      'schedules': {
+        'course_name': 'Penelusuran Informasi',
+        'start_time': '07:30:00',
+        'end_time': '09:10:00',
+      },
+    });
+    expect(meeting.startTimeShort, '07:30');
+    expect(meeting.endTimeShort, '09:10');
+  });
+
+  test('MeetingModel keeps time strings without an HH:MM segment as-is', () {
+    expect(
+      MeetingModel(
+        id: 31,
+        meetingNumber: 5,
+        isPresenceOpen: false,
+      ).startTimeShort,
+      '',
+    );
+    final odd = MeetingModel(
+      id: 32,
+      meetingNumber: 6,
+      startTime: '7:30',
+      isPresenceOpen: false,
+    );
+    expect(odd.startTimeShort, '7:30');
+  });
 }

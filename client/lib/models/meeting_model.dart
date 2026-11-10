@@ -111,6 +111,20 @@ class MeetingModel {
     );
   }
 
+  /// `startTime` normalized for display: hours and minutes only (HH:mm).
+  /// Falls back to the raw string when it carries no HH:MM segment.
+  String get startTimeShort => _stripSeconds(startTime);
+
+  /// `endTime` normalized for display: hours and minutes only (HH:mm).
+  String get endTimeShort => _stripSeconds(endTime);
+
+  /// Removes the seconds segment from a Simkuliah time-of-day string.
+  static String _stripSeconds(String time) {
+    final match = RegExp(r'(\d{2})[:.](\d{2})').firstMatch(time);
+    if (match == null) return time;
+    return '${match.group(1)}:${match.group(2)}';
+  }
+
   /// True strictly when attendance is recorded as 'hadir' in Simkuliah.
   /// Presence status has absolute precedence over local overrides.
   bool get isAttended => simkuliahStatus.toLowerCase() == 'hadir';

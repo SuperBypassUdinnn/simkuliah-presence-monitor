@@ -214,9 +214,55 @@ class _ActiveLectureCardState extends State<ActiveLectureCard> {
           : (selected) {
               if (selected) {
                 _handleOverrideSelected(style.type);
+              } else if (isSelected) {
+                // Tapping the selected chip once more cancels the status.
+                _handleOverrideCancel(style);
               }
             },
     );
+  }
+
+  /// Cancels the active self-reported status after an explicit
+  /// confirmation, mirroring the submit flow's dialogs and notifications.
+  Future<void> _handleOverrideCancel(OverrideStyle style) async {
+    final confirmed = await _showConfirmDialog(
+      title: 'Batalkan Keterangan Mandiri?',
+      content:
+          'Apakah Anda yakin ingin membatalkan status "${style.label}" untuk ${widget.meeting.courseName}?',
+      confirmLabel: 'Konfirmasi',
+      confirmColor: style.color,
+    );
+
+    if (!confirmed || !mounted) return;
+
+    setState(() => _submitting = true);
+    try {
+      await _service.clearOverride(meetingId: widget.meeting.id);
+      if (mounted) {
+        setState(() => _activeOverride = null);
+        AppNotification.show(
+          context,
+          title: 'Keterangan Dibatalkan',
+          message:
+              'Status "${style.label}" untuk ${widget.meeting.courseName} dihapus.',
+          color: Colors.blueGrey,
+          icon: Icons.undo,
+        );
+        widget.onStatusChanged?.call();
+      }
+    } catch (error) {
+      if (mounted) {
+        AppNotification.show(
+          context,
+          title: 'Gagal Membatalkan',
+          message: 'Keterangan mandiri tidak dapat dibatalkan: $error',
+          color: Colors.red.shade600,
+          icon: Icons.error_outline,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
   }
 
   Widget _buildStatusBanner(BuildContext context) {
@@ -313,7 +359,7 @@ class _ActiveLectureCardState extends State<ActiveLectureCard> {
             const Icon(Icons.schedule, color: Colors.blue, size: 18),
             const SizedBox(width: 8),
             Text(
-              'Belum Dimulai (Pukul ${widget.meeting.startTime} WIB)',
+              'Belum Dimulai (Pukul ${widget.meeting.startTimeShort} WIB)',
               style: const TextStyle(
                 color: Colors.blue,
                 fontWeight: FontWeight.w600,
@@ -451,7 +497,7 @@ class _ActiveLectureCardState extends State<ActiveLectureCard> {
                       ),
                       const SizedBox(width: 4),
                       Text(
-                        '${widget.meeting.startTime} - ${widget.meeting.endTime} WIB',
+                        '${widget.meeting.startTimeShort} - ${widget.meeting.endTimeShort} WIB',
                         style: Theme.of(context).textTheme.bodyMedium,
                       ),
                     ],

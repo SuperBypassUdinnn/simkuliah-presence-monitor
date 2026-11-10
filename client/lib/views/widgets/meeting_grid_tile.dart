@@ -120,7 +120,7 @@ class MeetingGridTile extends StatelessWidget {
                   if (meeting.startTime.isNotEmpty)
                     _detailRow(
                       'Jam',
-                      '${meeting.startTime} - ${meeting.endTime} WIB',
+                      '${meeting.startTimeShort} - ${meeting.endTimeShort} WIB',
                     ),
                   if (meeting.room.isNotEmpty)
                     _detailRow('Ruang', meeting.room),
@@ -167,15 +167,23 @@ class MeetingGridTile extends StatelessWidget {
                           ),
                           side: BorderSide(color: style.color),
                           onSelected: (selected) async {
-                            if (!selected) return;
+                            // Tapping the selected chip once more cancels
+                            // the status; tapping an unselected chip when
+                            // no override is active does nothing.
+                            final isCancel = !selected && isSelected;
+                            if (!selected && !isCancel) return;
                             final confirmed = await showDialog<bool>(
                               context: context,
                               builder: (c) => AlertDialog(
-                                title: const Text(
-                                  'Konfirmasi Keterangan Mandiri',
+                                title: Text(
+                                  isCancel
+                                      ? 'Batalkan Keterangan Mandiri?'
+                                      : 'Konfirmasi Keterangan Mandiri',
                                 ),
                                 content: Text(
-                                  'Apakah Anda yakin ingin menetapkan status pertemuan ini menjadi "$label"?',
+                                  isCancel
+                                      ? 'Apakah Anda yakin ingin membatalkan status "$label" untuk pertemuan ini?'
+                                      : 'Apakah Anda yakin ingin menetapkan status pertemuan ini menjadi "$label"?',
                                 ),
                                 actions: [
                                   TextButton(
@@ -200,7 +208,16 @@ class MeetingGridTile extends StatelessWidget {
                               ),
                             );
 
-                            if (confirmed == true && meeting.id > 0) {
+                            if (confirmed != true || meeting.id <= 0) return;
+
+                            if (isCancel) {
+                              await service.clearOverride(
+                                meetingId: meeting.id,
+                              );
+                              setDialogState(() {
+                                currentOverride = null;
+                              });
+                            } else {
                               await service.submitOverride(
                                 meetingId: meeting.id,
                                 overrideType: type,
@@ -208,10 +225,10 @@ class MeetingGridTile extends StatelessWidget {
                               setDialogState(() {
                                 currentOverride = type;
                               });
-                              if (context.mounted) {
-                                Navigator.of(dialogContext).pop();
-                                onOverrideChanged?.call();
-                              }
+                            }
+                            if (context.mounted) {
+                              Navigator.of(dialogContext).pop();
+                              onOverrideChanged?.call();
                             }
                           },
                         );
