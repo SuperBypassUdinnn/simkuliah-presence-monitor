@@ -14,6 +14,7 @@ import 'core/app_notification.dart';
 import 'core/firebase_config.dart';
 import 'core/refresh_bus.dart';
 import 'core/supabase_config.dart';
+import 'services/android_background_service.dart';
 import 'services/push_notification_service.dart';
 import 'services/realtime_alert_service.dart';
 import 'views/active_presence_view.dart';
@@ -32,6 +33,12 @@ Future<void> main() async {
     await PushNotificationService.instance.initialize();
   } catch (e) {
     debugPrint('Push notification note: $e');
+  }
+  if (!kIsWeb && Platform.isAndroid) {
+    // Fire-and-forget so the service handshake never delays the first
+    // frame; the activity is foreground here, which is what allows the
+    // foreground-service start on Android 12+.
+    unawaited(AndroidBackgroundService.start());
   }
   if (!kIsWeb && (Platform.isLinux || Platform.isWindows)) {
     // Desktop window management: initialize before runApp so hide-on-close
