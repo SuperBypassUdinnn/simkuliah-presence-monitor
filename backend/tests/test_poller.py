@@ -174,6 +174,97 @@ async def test_poller_tick_parses_and_updates_database(poller_deps):
 
 
 @pytest.mark.asyncio
+async def test_poller_tick_records_telemetry(poller_deps):
+    from app.services.simkuliah_parser import ParsedScheduleItem
+
+    deps = poller_deps
+    items = [
+        ParsedScheduleItem(
+            course_code="INF201",
+            course_name="Grafika Komputer",
+            room="Ruang 301",
+            start_time="08:00",
+            end_time="09:40",
+            lecturer="Dr. Dosen, M.Kom",
+        )
+    ]
+
+    with (
+        patch("app.services.poller.parse_daily_schedule", return_value=items),
+        patch("app.services.poller.evaluate_notification_state", return_value=None),
+        patch("app.services.poller.parse_meeting_matrix", return_value=[]),
+    ):
+        poller = AdaptivePoller(
+            client=deps["client"],
+            repo=deps["repo"],
+            dispatcher=deps["dispatcher"],
+            scheduler=deps["scheduler"],
+        )
+        await poller._tick()
+
+    assert poller.last_tick["html_bytes"] == len("<html>schedule</html>")
+    assert poller.last_tick["items"] == 1
+    assert poller.last_tick["matrix_courses"] == 0
+    assert "error" not in poller.last_tick
+
+
+@pytest.mark.asyncio
+async def test_poller_tick_records_parse_persist_error(poller_deps):
+    deps = poller_deps
+    deps["repo"].upsert_schedules = AsyncMock(side_effect=RuntimeError("db down"))
+
+    with (
+        patch("app.services.poller.parse_daily_schedule", return_value=[]),
+        patch("app.services.poller.evaluate_notification_state", return_value=None),
+    ):
+        poller = AdaptivePoller(
+            client=deps["client"],
+            repo=deps["repo"],
+            dispatcher=deps["dispatcher"],
+            scheduler=deps["scheduler"],
+        )
+        # Must not raise: the failure is recorded for the health endpoint.
+        await poller._tick()
+
+    assert poller.last_tick["error"].startswith("parse/persist:")
+    deps["dispatcher"].dispatch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_poller_tick_records_matrix_sync_error(poller_deps):
+    from app.services.simkuliah_parser import ParsedCourseMeetings, ParsedMeetingCell
+
+    deps = poller_deps
+    deps["repo"].upsert_meetings = AsyncMock(side_effect=RuntimeError("db down"))
+    courses = [
+        ParsedCourseMeetings(
+            course_code="INF201",
+            course_name="Grafika Komputer",
+            class_group="A",
+            meetings=[ParsedMeetingCell(meeting_number=1, meeting_date="2026-11-11")],
+        )
+    ]
+
+    with (
+        patch("app.services.poller.parse_daily_schedule", return_value=[]),
+        patch("app.services.poller.parse_meeting_matrix", return_value=courses),
+        patch("app.services.poller.evaluate_notification_state", return_value=None),
+    ):
+        poller = AdaptivePoller(
+            client=deps["client"],
+            repo=deps["repo"],
+            dispatcher=deps["dispatcher"],
+            scheduler=deps["scheduler"],
+        )
+        # The sync failure is non-fatal and recorded for the health endpoint.
+        await poller._tick()
+
+    assert poller.last_tick["matrix_courses"] == 1
+    assert poller.last_tick["meetings_synced"] == 1
+    assert poller.last_tick["matrix_error"] == "db down"
+
+
+@pytest.mark.asyncio
 async def test_poller_tick_dispatches_notification(poller_deps):
     from app.services.simkuliah_parser import ParsedScheduleItem
 
