@@ -230,3 +230,38 @@ def test_parse_attendance_status_returns_first_card():
     assert status.course_code == "SINF6045"
     assert status.meeting_number == 12
     assert status.is_student_present is True
+
+
+SIMPLETABLE_HTML_CLASS_C = """
+<table id="simpletable">
+  <tr><th>Kode</th><th>Mata Kuliah</th><th colspan="2">Pertemuan</th></tr>
+  <tr><th>1</th><th>2</th></tr>
+  <tr>
+    <td>SINF3033</td>
+    <td>PRAKTIKUM KECERDASAN ARTIFISIAL(Kelas : C)</td>
+    <td class="table-danger">Nama :Dosen Satu, S.T.NIP :199107232024062001Hari, tanggal : Rabu, 11-11-2026Ruang : Lab. KAJam : 08:00 - 09:40</td>
+    <td></td>
+  </tr>
+</table>
+"""
+
+
+def test_parse_daily_schedule_extracts_class_group_from_simpletable():
+    """The row's (Kelas : X) paren must reach the schedule row's class group.
+
+    Losing it used to upsert every today-page course as group A, creating a
+    phantom schedule row for courses whose real group differs (observed as a
+    duplicate PRAKTIKUM KECERDASAN ARTIFISIAL Kelas A row in the matrix).
+    """
+    items = parse_daily_schedule(SIMPLETABLE_HTML_CLASS_C)
+    assert len(items) == 1
+    assert items[0].course_code == "SINF3033"
+    assert items[0].class_group == "C"
+    assert items[0].course_name == "PRAKTIKUM KECERDASAN ARTIFISIAL"
+
+
+def test_parse_daily_schedule_defaults_class_group_without_paren():
+    # The 5-column fallback rows carry no paren; the default group stays A.
+    items = parse_daily_schedule(MOCK_SCHEDULE_HTML)
+    assert items
+    assert all(item.class_group == "A" for item in items)
