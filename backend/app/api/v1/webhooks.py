@@ -121,12 +121,24 @@ async def webhook_action(
         override_type = (body.override_type if body else None) or payload.get("override_type")
         meeting_id = (body.meeting_id if body else None) or payload.get("meeting_id")
         if meeting_id is None:
-            # Action buttons signed by the poller carry (schedule_id,
-            # meeting_no); resolve the meetings-table id from those.
-            schedule_id = (body.schedule_id if body else None) or payload.get("schedule_id")
+            # Action buttons signed by the poller carry both ids: schedule_id
+            # is Simkuliah's jadwal id (needed by confirm_presence) while
+            # db_schedule_id is the Supabase schedules.id that meetings rows
+            # and overrides actually use. Resolve against the Supabase id
+            # first; a token minted before the split carried the Supabase id
+            # in schedule_id, so it stays a last-resort candidate.
             meeting_no = (body.meeting_no if body else None) or payload.get("meeting_no")
-            if schedule_id is not None and meeting_no is not None:
-                meeting_id = await _get_db().resolve_meeting_id(schedule_id, meeting_no)
+            candidates = [
+                payload.get("db_schedule_id"),
+                body.schedule_id if body else None,
+                payload.get("schedule_id"),
+            ]
+            for candidate in dict.fromkeys(candidates):
+                if candidate is None or meeting_no is None:
+                    continue
+                meeting_id = await _get_db().resolve_meeting_id(candidate, meeting_no)
+                if meeting_id is not None:
+                    break
         if override_type not in _VALID_OVERRIDE_TYPES:
             raise HTTPException(status_code=400, detail=f"Invalid override type: {override_type!r}")
         if meeting_id is None:

@@ -87,6 +87,26 @@ async def test_record_meeting_status_upserts_live_state():
 
 
 @pytest.mark.asyncio
+async def test_record_meeting_status_uses_explicit_database_ids():
+    """The card's id is Simkuliah's jadwal id and violates the meetings
+    foreign key; callers pass the Supabase ids explicitly instead."""
+    repo = DatabaseRepository(client=MagicMock())
+    status = ParsedMeetingStatus(
+        is_open=True,
+        deadline_time="08:31",
+        meeting_number=11,
+        schedule_id=6220432,
+    )
+    now = datetime(2026, 11, 11, 8, 12)
+    await repo.record_meeting_status(status, now=now, schedule_id=9, meeting_number=11)
+
+    payload = repo.client.table().upsert.call_args[0][0]
+    assert payload["schedule_id"] == 9
+    assert payload["meeting_number"] == 11
+    assert payload["lecturer_opened_at"] == now.astimezone().isoformat()
+
+
+@pytest.mark.asyncio
 async def test_record_meeting_status_skips_ambiguous_row():
     repo = DatabaseRepository(client=MagicMock())
     status = ParsedMeetingStatus(is_open=True)

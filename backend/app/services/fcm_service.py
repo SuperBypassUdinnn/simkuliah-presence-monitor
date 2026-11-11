@@ -11,6 +11,11 @@ from datetime import timedelta
 from typing import Any, Callable
 
 from app.core.security import create_action_token
+from app.services.notification_content import (
+    ACTIONABLE_STATES,
+    notification_text,
+    notification_title,
+)
 from app.services.state_machine import NotificationLevel, Priority, priority_for_state
 
 logger = logging.getLogger(__name__)
@@ -111,44 +116,53 @@ class FcmDispatcher:
     def _build_payload(
         self, state: NotificationLevel, context: dict
     ) -> tuple[str, str, dict[str, str]]:
-        course = context.get("course_code", "Kelas")
-        room = context.get("room", "")
-        lecturer = context.get("lecturer", "")
-
-        title = f"Presensi {course}".strip()
-        message = self._message_text(state, course, room, lecturer)
+        title = notification_title(state, context)
+        message = notification_text(state, context)
 
         schedule_id = context.get("schedule_id")
+        db_schedule_id = context.get("db_schedule_id")
         meeting_no = context.get("meeting_no")
         base_payload: dict[str, Any] = {"action_kind": state.value}
         if schedule_id is not None:
             base_payload["schedule_id"] = schedule_id
+        if db_schedule_id is not None:
+            base_payload["db_schedule_id"] = db_schedule_id
         if meeting_no is not None:
             base_payload["meeting_no"] = meeting_no
 
+        actions = self._build_actions(base_payload) if state in ACTIONABLE_STATES else []
         data = {
             key: str(value)
             for key, value in {
                 **base_payload,
-                "course_code": course,
+                "course_code": context.get("course_code", ""),
                 "course_name": context.get("course_name", ""),
-                "room": room,
-                "lecturer": lecturer,
-                "actions": json.dumps(self._build_actions(base_payload)),
+                "room": context.get("room", ""),
+                "lecturer": context.get("lecturer", ""),
+                "title": title,
+                "body": message,
+                "actions": json.dumps(actions),
             }.items()
         }
         return title, message, data
 
     def _build_actions(self, base_payload: dict[str, Any]) -> list[dict[str, str]]:
-        """Signed action buttons, rendered natively by the Android client."""
-        confirm = dict(base_payload, action="confirm_presence")
-        actions = [
-            {
-                "label": "Presensi Sekarang",
-                "action": "confirm_presence",
-                "token": self._sign(confirm),
-            }
-        ]
+        """Signed action buttons, rendered natively by the Android client.
+
+        The confirm button is omitted when the payload carries no Simkuliah
+        jadwal id: ``confirm_presence`` cannot work without it, and sending
+        the Supabase id instead makes Simkuliah reject the request.
+        """
+        actions: list[dict[str, str]] = []
+        if base_payload.get("schedule_id") is not None:
+            confirm = dict(base_payload, action="confirm_presence")
+            actions.append(
+                {
+                    "label": "Presensi Sekarang",
+                    "action": "confirm_presence",
+                    "token": self._sign(confirm),
+                }
+            )
         for label, override_type in (("Izin", "izin"), ("Sakit", "sakit")):
             override = dict(base_payload, action="mark_override", override_type=override_type)
             actions.append(
@@ -159,19 +173,6 @@ class FcmDispatcher:
                 }
             )
         return actions
-
-    def _message_text(self, state: NotificationLevel, course: str, room: str, lecturer: str) -> str:
-        where = f" ({room})" if room else ""
-        who = f" - {lecturer}" if lecturer else ""
-        base = f"{course}{where}{who}"
-        texts = {
-            NotificationLevel.CLASS_STARTED: f"Kelas dimulai: {base}.",
-            NotificationLevel.LECTURER_OPENED: f"Dosen telah buka presensi: {base}.",
-            NotificationLevel.PENDING_REMINDER: f"Pengingat: segera konfirmasi presensi {base}.",
-            NotificationLevel.URGENT_CLOSING: f"Presensi hampir tutup: {base}.",
-            NotificationLevel.WINDOW_EXPIRED: f"Jendela presensi telah tutup: {base}.",
-        }
-        return texts[state]
 
     def _sign(self, payload: dict[str, Any]) -> str:
         return create_action_token(

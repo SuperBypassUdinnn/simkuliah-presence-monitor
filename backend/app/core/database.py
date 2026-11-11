@@ -125,6 +125,8 @@ class DatabaseRepository:
         status: ParsedMeetingStatus,
         *,
         now: datetime | None = None,
+        schedule_id: int | None = None,
+        meeting_number: int | None = None,
     ) -> None:
         """Upsert one meeting's live attendance status into ``meetings``.
 
@@ -133,8 +135,19 @@ class DatabaseRepository:
         ``lecturer_opened_at``. Requires both ``schedule_id`` and
         ``meeting_number`` — without them the target row is ambiguous and the
         call is skipped.
+
+        ``schedule_id`` / ``meeting_number`` override the values carried on
+        ``status``. Callers must pass the Supabase ``schedules.id`` here:
+        the attendance card's id is Simkuliah's own jadwal id, which violates
+        the ``meetings.schedule_id`` foreign key and made every live-state
+        write fail silently (the app then kept showing "Dosen Belum Melakukan
+        Presensi" long after the lecturer opened presence).
         """
-        if status.schedule_id is None or status.meeting_number is None:
+        resolved_schedule_id = schedule_id if schedule_id is not None else status.schedule_id
+        resolved_meeting_number = (
+            meeting_number if meeting_number is not None else status.meeting_number
+        )
+        if resolved_schedule_id is None or resolved_meeting_number is None:
             return
 
         # Naive wall-clock "now" (local machine = Simkuliah's WIB). Attaching
@@ -142,8 +155,8 @@ class DatabaseRepository:
         # wall time matches what Simkuliah's "Batas Absen" expresses.
         moment = (now or datetime.now()).astimezone()
         payload: dict[str, Any] = {
-            "schedule_id": status.schedule_id,
-            "meeting_number": status.meeting_number,
+            "schedule_id": resolved_schedule_id,
+            "meeting_number": resolved_meeting_number,
             "last_polled_at": moment.isoformat(),
         }
         if status.deadline_time:

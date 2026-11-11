@@ -216,8 +216,49 @@ def test_parse_attendance_cards_parses_every_card():
     assert second.course_code == "INF201"
     assert second.meeting_number == 5
     assert second.is_student_present is False
-    assert second.is_open is True
+    # A konfirmasi button alone is not proof of an open window: Simkuliah
+    # renders it while "Batas Absen" still says "Dosen belum absen".
+    assert second.is_open is False
+    assert second.deadline_time is None
     assert second.schedule_id == 77
+
+
+CLOSED_CARD_HTML = """
+<div class="card">
+  <div class="card-header"><h5>Absensi Kelas A | SINF6069 - KEAMANAN SIBER | Pertemuan ke-13 | SKS Mengajar : 2</h5></div>
+  <div class="card-block">
+    <p>Anda belum absen</p>
+    <table><tbody>
+      <tr><td>A</td><td>Gedung MIPA</td><td>E.03.02</td><td>08.00 - 09.40</td><td>Dosen belum absen</td></tr>
+    </tbody></table>
+    <button id="konfirmasi-kehadiran-6243661">Konfirmasi Kehadiran</button>
+  </div>
+</div>
+"""
+
+
+def test_parse_attendance_cards_closed_marker_is_not_a_deadline():
+    """'Dosen belum absen' must never be treated as an open presence window.
+
+    Treating it as open produced a "Presensi Dibuka" push (with action
+    buttons) for a class whose lecturer had not opened presence yet.
+    """
+    cards = parse_attendance_cards(CLOSED_CARD_HTML)
+    assert len(cards) == 1
+    card = cards[0]
+    assert card.course_code == "SINF6069"
+    assert card.meeting_number == 13
+    assert card.is_open is False
+    assert card.deadline_time is None
+    # The button id is still captured: confirm_presence needs Simkuliah's id.
+    assert card.schedule_id == 6243661
+
+
+def test_parse_attendance_cards_open_deadline_marks_session_open():
+    cards = parse_attendance_cards(CLOSED_CARD_HTML.replace("Dosen belum absen", "08:31"))
+    assert len(cards) == 1
+    assert cards[0].is_open is True
+    assert cards[0].deadline_time == "08:31"
 
 
 def test_parse_attendance_cards_without_cards_returns_empty():

@@ -79,7 +79,12 @@ class MeetingModel {
 
     final isPresenceOpen =
         json['is_presence_open'] as bool? ??
-        (status.toLowerCase() == 'pending' && deadline != null);
+        (status.toLowerCase() == 'pending' &&
+            deadline != null &&
+            // A deadline in the past means the window already closed; the
+            // stored deadline is never cleared, so bound it by time or the
+            // card would claim "presensi sedang dibuka" forever.
+            deadline.isAfter(DateTime.now()));
 
     Map<String, dynamic>? overrideData;
     if (json['local_override'] is Map<String, dynamic>) {

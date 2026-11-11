@@ -346,6 +346,37 @@ class _ActiveLectureCardState extends State<ActiveLectureCard> {
       );
     }
 
+    final deadline = widget.meeting.deadlineAt;
+    if (deadline != null && !deadline.isAfter(DateTime.now())) {
+      // The lecturer did open presence, but the window has closed. Without
+      // this branch the card falls through to "Dosen Belum Melakukan
+      // Presensi", which is false and was the owner-reported confusion.
+      final hh = deadline.hour.toString().padLeft(2, '0');
+      final mm = deadline.minute.toString().padLeft(2, '0');
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.blueGrey.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.blueGrey.shade300),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.lock_clock, color: Colors.blueGrey, size: 18),
+            const SizedBox(width: 8),
+            Text(
+              'Presensi Ditutup (Batas $hh:$mm WIB)',
+              style: const TextStyle(
+                color: Colors.blueGrey,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     if (widget.meeting.isBeforeScheduleTime()) {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),

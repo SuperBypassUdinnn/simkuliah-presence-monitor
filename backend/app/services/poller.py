@@ -302,7 +302,13 @@ class AdaptivePoller:
             start_time = time.fromisoformat(item.start_time)
             end_time = time.fromisoformat(item.end_time)
 
+            # Supabase schedules.id: the only id valid for meetings rows and
+            # override lookups. Simkuliah's own jadwal id (carried by the
+            # attendance card's konfirmasi button) is a different number and
+            # violates the meetings.schedule_id foreign key.
             schedule_id: int | None = None
+            # Simkuliah jadwal id, used solely by the confirm_presence action.
+            simkuliah_schedule_id: int | None = None
             meeting_no: int | None = None
             is_dosen_open = False
             is_student_present = False
@@ -321,7 +327,7 @@ class AdaptivePoller:
                 )
 
             if meeting_status is not None:
-                schedule_id = meeting_status.schedule_id
+                simkuliah_schedule_id = meeting_status.schedule_id
                 meeting_no = meeting_status.meeting_number
                 is_dosen_open = meeting_status.is_open
                 is_student_present = meeting_status.is_student_present
@@ -334,29 +340,34 @@ class AdaptivePoller:
                     except ValueError:
                         deadline_at = None
 
-                # Cards without a konfirmasi button (e.g. "anda sudah
-                # absen") carry no schedule id; resolve it from the course.
-                # The parsed class group is authoritative: defaulting to A
-                # would miss every course whose real group differs.
-                if schedule_id is None:
-                    try:
-                        schedule_id = await self.repo.resolve_schedule_id(
-                            item.course_code, item.class_group
-                        )
-                    except Exception:  # noqa: BLE001 - non-fatal
-                        schedule_id = None
+            # Resolve the Supabase schedule row from the course and parsed
+            # class group. The parsed class group is authoritative:
+            # defaulting to A would miss every course whose real group
+            # differs. Resolved even without a card so overrides still work.
+            try:
+                schedule_id = await self.repo.resolve_schedule_id(
+                    item.course_code, item.class_group
+                )
+            except Exception:  # noqa: BLE001 - non-fatal
+                schedule_id = None
 
-                # Persist the live card data (deadline, lecturer-opened,
-                # hadir when already absen) so the client sees real state.
-                if schedule_id is not None and meeting_no is not None:
-                    try:
-                        await self.repo.record_meeting_status(meeting_status, now=now)
-                    except Exception as exc:  # noqa: BLE001 - non-fatal
-                        logger.warning(
-                            "record meeting status failed for %s: %s",
-                            item.course_code,
-                            exc,
-                        )
+            # Persist the live card data (deadline, lecturer-opened, hadir
+            # when already absen) so the client sees real state. The DB ids
+            # are passed explicitly because the card carries Simkuliah's id.
+            if meeting_status is not None and schedule_id is not None and meeting_no is not None:
+                try:
+                    await self.repo.record_meeting_status(
+                        meeting_status,
+                        now=now,
+                        schedule_id=schedule_id,
+                        meeting_number=meeting_no,
+                    )
+                except Exception as exc:  # noqa: BLE001 - non-fatal
+                    logger.warning(
+                        "record meeting status failed for %s: %s",
+                        item.course_code,
+                        exc,
+                    )
 
             # Check the database for an active override on this meeting.
             has_override = False
@@ -400,7 +411,13 @@ class AdaptivePoller:
                 "course_name": item.course_name,
                 "room": item.room,
                 "lecturer": item.lecturer,
-                "schedule_id": schedule_id,
+                # confirm_presence talks to Simkuliah and needs its jadwal id;
+                # override actions resolve a meetings row and need the
+                # Supabase id. Never substitute one for the other: when the
+                # Simkuliah id is unknown the confirm button is omitted
+                # upstream instead of silently sending the Supabase id.
+                "schedule_id": simkuliah_schedule_id,
+                "db_schedule_id": schedule_id,
                 "meeting_no": meeting_no,
             }
             if meeting_id is not None:

@@ -99,7 +99,9 @@ def test_payload_carries_signed_action_buttons():
     dispatcher.dispatch(NotificationLevel.LECTURER_OPENED, _CONTEXT)
 
     _tokens, title, message, data, _priority = send_calls[0]
-    assert title == "Presensi INF201"
+    # Course name is in the title so two simultaneous classes are tellable
+    # apart in the notification shade.
+    assert title == "Presensi Dibuka - Grafika Komputer (INF201)"
     assert message.startswith("Dosen telah buka presensi")
     actions = json.loads(data["actions"])
     assert [action["label"] for action in actions] == [
@@ -111,6 +113,63 @@ def test_payload_carries_signed_action_buttons():
         assert action["token"]
     assert data["schedule_id"] == "1042"
     assert data["meeting_no"] == "7"
+
+
+def test_class_started_payload_has_no_action_buttons():
+    """The schedule-entry alert fires before presence opens, so buttons that
+    confirm or self-report would act on a window that does not exist."""
+    dispatcher, send_calls, _removed = _recording_dispatcher(["token-1"])
+
+    dispatcher.dispatch(NotificationLevel.CLASS_STARTED, _CONTEXT)
+
+    _tokens, title, message, data, _priority = send_calls[0]
+    assert title == "Kelas Dimulai - Grafika Komputer (INF201)"
+    assert "belum" not in message.lower()
+    assert json.loads(data["actions"]) == []
+    # Course identity still travels in the body for the notification shade.
+    assert "Grafika Komputer" in message
+    assert "INF201" in message
+
+
+def test_expired_payload_has_no_action_buttons():
+    dispatcher, send_calls, _removed = _recording_dispatcher(["token-1"])
+
+    dispatcher.dispatch(NotificationLevel.WINDOW_EXPIRED, _CONTEXT)
+
+    _tokens, title, _message, data, _priority = send_calls[0]
+    assert title == "Presensi Ditutup - Grafika Komputer (INF201)"
+    assert json.loads(data["actions"]) == []
+
+
+def test_action_token_carries_both_schedule_ids():
+    """confirm_presence needs Simkuliah's jadwal id; overrides need the
+    Supabase id. Both must survive into the signed payload."""
+    dispatcher, send_calls, _removed = _recording_dispatcher(["token-1"])
+    context = dict(_CONTEXT, schedule_id=6220432, db_schedule_id=9)
+
+    dispatcher.dispatch(NotificationLevel.LECTURER_OPENED, context)
+
+    _tokens, _title, _message, data, _priority = send_calls[0]
+    assert data["schedule_id"] == "6220432"
+    assert data["db_schedule_id"] == "9"
+
+
+def test_confirm_button_omitted_without_simkuliah_id():
+    """A card can be open without exposing a konfirmasi button id. Sending
+    the Supabase id to Simkuliah would be rejected, so only the overrides
+    remain actionable."""
+    dispatcher, send_calls, _removed = _recording_dispatcher(["token-1"])
+    context = dict(_CONTEXT)
+    context.pop("schedule_id")
+    context["db_schedule_id"] = 9
+
+    dispatcher.dispatch(NotificationLevel.LECTURER_OPENED, context)
+
+    _tokens, _title, _message, data, _priority = send_calls[0]
+    actions = json.loads(data["actions"])
+    assert [action["label"] for action in actions] == ["Izin", "Sakit"]
+    assert "schedule_id" not in data
+    assert data["db_schedule_id"] == "9"
 
 
 # --------------------------------------------------------------------- #
