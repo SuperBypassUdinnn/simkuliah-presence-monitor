@@ -128,13 +128,18 @@ class DatabaseRepository:
         schedule_id: int | None = None,
         meeting_number: int | None = None,
     ) -> None:
-        """Upsert one meeting's live attendance status into ``meetings``.
+        """Update one meeting's live attendance status in ``meetings``.
 
-        Only provided fields are written: PostgREST upserts leave missing
-        columns untouched, so a closed session never clears an earlier
-        ``lecturer_opened_at``. Requires both ``schedule_id`` and
+        Only provided fields are written, so a closed session never clears an
+        earlier ``lecturer_opened_at``. Requires both ``schedule_id`` and
         ``meeting_number`` — without them the target row is ambiguous and the
         call is skipped.
+
+        The write is an UPDATE on ``(schedule_id, meeting_number)``, not an
+        upsert: ``meetings.meeting_date`` is NOT NULL and Postgres validates
+        NOT NULL before ON CONFLICT resolution, so a partial upsert payload
+        failed on every tick. The matrix sync creates the rows; this only
+        refreshes their live state.
 
         ``schedule_id`` / ``meeting_number`` override the values carried on
         ``status``. Callers must pass the Supabase ``schedules.id`` here:
@@ -173,10 +178,24 @@ class DatabaseRepository:
             payload["simkuliah_status"] = "hadir"
 
         def operation() -> None:
-            self.client.table(_TABLE_MEETINGS).upsert(
-                payload,
-                on_conflict="schedule_id,meeting_number",
-            ).execute()
+            # Update, not upsert: a partial payload cannot be inserted because
+            # ``meetings.meeting_date`` is NOT NULL and Postgres validates
+            # that before ON CONFLICT resolution. The matrix sync owns row
+            # creation, so this only refreshes live state on the existing row.
+            updated = (
+                self.client.table(_TABLE_MEETINGS)
+                .update(payload)
+                .eq("schedule_id", resolved_schedule_id)
+                .eq("meeting_number", resolved_meeting_number)
+                .select("id")
+                .execute()
+            )
+            if not updated.data:
+                logger.warning(
+                    "meeting row (%s, %s) not found; live state not recorded",
+                    resolved_schedule_id,
+                    resolved_meeting_number,
+                )
 
         await self._with_retry(operation, "record_meeting_status")
 
