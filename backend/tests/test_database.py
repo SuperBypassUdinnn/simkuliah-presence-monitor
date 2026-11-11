@@ -74,8 +74,8 @@ async def test_record_meeting_status_upserts_live_state():
     await repo.record_meeting_status(status, now=now)
 
     repo.client.table.assert_called_with("meetings")
-    repo.client.table().upsert.assert_called_once()
-    payload = repo.client.table().upsert.call_args[0][0]
+    repo.client.table().update.assert_called_once()
+    payload = repo.client.table().update.call_args[0][0]
     assert payload["schedule_id"] == 1042
     assert payload["meeting_number"] == 12
     assert payload["last_polled_at"] == now.astimezone().isoformat()
@@ -83,7 +83,11 @@ async def test_record_meeting_status_upserts_live_state():
     assert payload["simkuliah_status"] == "hadir"
     # Deadline keeps the wall clock from Simkuliah with the local offset.
     assert "T17:45:00" in payload["deadline_at"]
-    assert repo.client.table().upsert.call_args[1] == {"on_conflict": "schedule_id,meeting_number"}
+    # The row is matched on the (schedule_id, meeting_number) key; a partial
+    # payload cannot be inserted because meeting_date is NOT NULL.
+    update_mock = repo.client.table().update()
+    assert update_mock.eq.call_args.args == ("schedule_id", 1042)
+    assert update_mock.eq.return_value.eq.call_args.args == ("meeting_number", 12)
 
 
 @pytest.mark.asyncio
@@ -100,7 +104,7 @@ async def test_record_meeting_status_uses_explicit_database_ids():
     now = datetime(2026, 11, 11, 8, 12)
     await repo.record_meeting_status(status, now=now, schedule_id=9, meeting_number=11)
 
-    payload = repo.client.table().upsert.call_args[0][0]
+    payload = repo.client.table().update.call_args[0][0]
     assert payload["schedule_id"] == 9
     assert payload["meeting_number"] == 11
     assert payload["lecturer_opened_at"] == now.astimezone().isoformat()
@@ -122,7 +126,7 @@ async def test_record_meeting_status_closed_card_only_touches_poll_time():
     now = datetime(2026, 11, 9, 19, 0)
     await repo.record_meeting_status(status, now=now)
 
-    payload = repo.client.table().upsert.call_args[0][0]
+    payload = repo.client.table().update.call_args[0][0]
     assert "lecturer_opened_at" not in payload
     assert "deadline_at" not in payload
     assert "simkuliah_status" not in payload

@@ -37,6 +37,13 @@ Two owner-reported defects, fixed in this order:
    accepted any non-null deadline regardless of time, and the card had no
    branch for a deadline in the past, falling through to "Dosen Belum
    Melakukan Presensi".
+4. **Partial upsert violated a NOT NULL column.** Once the id was correct,
+   `record_meeting_status` still failed: its payload carries only live-state
+   fields, and `meetings.meeting_date` is NOT NULL. Postgres validates NOT
+   NULL before `ON CONFLICT` resolution, so every upsert attempted an insert
+   and raised `23502` (confirmed against the live database: three retries per
+   card, new ids 1155-1157). The write must be an UPDATE on
+   `(schedule_id, meeting_number)`; the matrix sync owns row creation.
 
 ## 3. Implementation Checklist
 
@@ -46,7 +53,8 @@ Two owner-reported defects, fixed in this order:
       id is still captured because `confirm_presence` needs it.
 - [x] `record_meeting_status` takes explicit `schedule_id` /
       `meeting_number` overrides so callers can supply the Supabase ids while
-      the card keeps Simkuliah's id.
+      the card keeps Simkuliah's id, and updates the existing row instead of
+      upserting a partial payload.
 - [x] Poller keeps two ids per meeting: `schedule_id` (Supabase, for meetings
       rows and override lookups) and `simkuliah_schedule_id` (for the
       `confirm_presence` action token). The dispatch context carries both as
@@ -72,8 +80,13 @@ Two owner-reported defects, fixed in this order:
 
 - `python3 scripts/verify_pipeline.py` passes (ruff check, ruff format,
   backend pytest, flutter analyze, dart format).
-- Backend 134 tests and client 70 tests pass, including new coverage for the
-  closed-card marker, the dual-id token, and button gating.
+- Backend 137 tests and client 70 tests pass, including new coverage for the
+  closed-card marker, the dual-id token, button gating, and the
+  update-on-live-state write path.
 - Live dashboard evidence: SINF6047 P11 parsed open with deadline 08:31,
   SINF6069 P13 parsed closed ("Dosen belum absen") while still exposing
   `konfirmasi-kehadiran-6243661`.
+- Live write evidence after the fix: one sync run wrote SINF6047 P11
+  (`hadir`, deadline 08:31 WIB) and SINF6069 P13 (`hadir`, deadline 09:09 WIB)
+  with fresh `last_polled_at`, the first successful live-state writes since
+  2026-11-09.
