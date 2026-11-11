@@ -3,7 +3,7 @@ description: Simkuliah Monitor - multi-platform Flutter client for the Simkuliah
 publish_to: 'none'
 # versionCode bumps with every release build: the phone refuses to install
 # an APK whose versionCode is not higher than the installed one.
-version: 1.0.3+2
+version: 1.0.4+3
 
 environment:
   sdk: ">=3.13.0 <4.0.0"
