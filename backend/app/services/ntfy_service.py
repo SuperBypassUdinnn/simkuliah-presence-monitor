@@ -11,6 +11,11 @@ from typing import Any
 import httpx
 
 from app.core.security import create_action_token
+from app.services.notification_content import (
+    ACTIONABLE_STATES,
+    notification_text,
+    notification_title,
+)
 from app.services.state_machine import NotificationLevel, Priority, priority_for_state
 
 # ntfy defaults. When the app settings are importable they are the single
@@ -97,38 +102,41 @@ class NtfyDispatcher:
     def _build_payload(
         self, state: NotificationLevel, context: dict
     ) -> tuple[str, str, list[dict[str, str]]]:
-        course = context.get("course_code", "Kelas")
-        room = context.get("room", "")
-        lecturer = context.get("lecturer", "")
-
-        title = f"Presensi {course}".strip()
-        message = self._message_text(state, course, room, lecturer)
+        title = notification_title(state, context)
+        message = notification_text(state, context)
 
         schedule_id = context.get("schedule_id")
+        db_schedule_id = context.get("db_schedule_id")
         meeting_no = context.get("meeting_no")
         base_payload: dict[str, Any] = {}
         if schedule_id is not None:
             base_payload["schedule_id"] = schedule_id
+        if db_schedule_id is not None:
+            base_payload["db_schedule_id"] = db_schedule_id
         if meeting_no is not None:
             base_payload["meeting_no"] = meeting_no
 
         actions: list[dict[str, str]] = []
 
-        if not self.api_base_url:
+        if not self.api_base_url or state not in ACTIONABLE_STATES:
             # Without a resolvable backend origin, action buttons would point
             # at ntfy.sh and never work; send a plain notification instead.
+            # Non-actionable states carry no buttons either.
             return title, message, actions
 
-        # "Presensi Sekarang" - direct presence confirmation.
-        confirm_payload = dict(base_payload, action="confirm_presence")
-        actions.append(
-            {
-                "label": "Presensi Sekarang",
-                "type": "http",
-                "target": self._action_url("confirm_presence"),
-                "token": self._sign(confirm_payload),
-            }
-        )
+        # "Presensi Sekarang" - direct presence confirmation. Omitted when the
+        # payload has no Simkuliah jadwal id, because confirm_presence cannot
+        # act on the Supabase id.
+        if base_payload.get("schedule_id") is not None:
+            confirm_payload = dict(base_payload, action="confirm_presence")
+            actions.append(
+                {
+                    "label": "Presensi Sekarang",
+                    "type": "http",
+                    "target": self._action_url("confirm_presence"),
+                    "token": self._sign(confirm_payload),
+                }
+            )
 
         # "Izin" and "Sakit" overrides.
         for label, override_type in (("Izin", "izin"), ("Sakit", "sakit")):
@@ -145,19 +153,6 @@ class NtfyDispatcher:
             )
 
         return title, message, actions
-
-    def _message_text(self, state: NotificationLevel, course: str, room: str, lecturer: str) -> str:
-        where = f" ({room})" if room else ""
-        who = f" - {lecturer}" if lecturer else ""
-        base = f"{course}{where}{who}"
-        texts = {
-            NotificationLevel.CLASS_STARTED: f"Kelas dimulai: {base}.",
-            NotificationLevel.LECTURER_OPENED: f"Dosen telah buka presensi: {base}.",
-            NotificationLevel.PENDING_REMINDER: f"Pengingat: segera konfirmasi presensi {base}.",
-            NotificationLevel.URGENT_CLOSING: f"Presensi hampir tutup: {base}.",
-            NotificationLevel.WINDOW_EXPIRED: f"Jendela presensi telah tutup: {base}.",
-        }
-        return texts[state]
 
     def _priority(self, state: NotificationLevel) -> str:
         # Shared priority policy: only lecturer-opened and urgent-closing are

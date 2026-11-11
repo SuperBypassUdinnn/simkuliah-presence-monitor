@@ -98,6 +98,42 @@ async def test_webhook_action_valid_token_mark_override():
 
 
 @pytest.mark.asyncio
+async def test_webhook_override_prefers_db_schedule_id_over_simkuliah_id():
+    """The signed payload carries Simkuliah's jadwal id in ``schedule_id``
+    and the Supabase id in ``db_schedule_id``; the override must resolve the
+    meetings row with the Supabase id only."""
+    from app.api.v1 import webhooks
+
+    webhooks.db_repo = MagicMock()
+    webhooks.db_repo.save_override = AsyncMock()
+    webhooks.db_repo.resolve_meeting_id = AsyncMock(return_value=127)
+    webhooks.simkuliah_client = MagicMock()
+    webhooks._processed_tokens.clear()
+
+    payload = {
+        "action": "mark_override",
+        "override_type": "sakit",
+        "schedule_id": 6220432,
+        "db_schedule_id": 9,
+        "meeting_no": 11,
+    }
+    token = create_action_token(payload, secret=SECRET, expires_in_seconds=300)
+
+    async with _client() as ac:
+        response = await ac.post(
+            "/api/v1/webhook/action",
+            headers={"X-Action-Token": token},
+            json=payload,
+        )
+
+    assert response.status_code == 200
+    webhooks.db_repo.resolve_meeting_id.assert_called_once_with(9, 11)
+    webhooks.db_repo.save_override.assert_called_once_with(
+        meeting_id=127, override_type="sakit", note=""
+    )
+
+
+@pytest.mark.asyncio
 async def test_webhook_action_missing_token():
     async with _client() as ac:
         response = await ac.post(

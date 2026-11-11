@@ -120,9 +120,31 @@ def test_body_is_plain_message_text():
     assert not text.lstrip().startswith("{")
 
 
-def test_title_contains_course_code():
+def test_title_contains_course_name_and_code():
     client = _FakeClient()
     _dispatcher(client).dispatch(NotificationLevel.LECTURER_OPENED, context=_CONTEXT)
 
     _url, _content, headers = client.last_request
-    assert headers["Title"] == "Presensi INF201"
+    assert headers["Title"] == "Presensi Dibuka - Grafika Komputer (INF201)"
+
+
+def test_class_started_has_no_action_buttons():
+    client = _FakeClient()
+    _dispatcher(client).dispatch(NotificationLevel.CLASS_STARTED, context=_CONTEXT)
+
+    _url, _content, headers = client.last_request
+    assert headers["Title"] == "Kelas Dimulai - Grafika Komputer (INF201)"
+    assert "Actions" not in headers
+
+
+def test_confirm_button_omitted_without_simkuliah_id():
+    client = _FakeClient()
+    context = dict(_CONTEXT)
+    context.pop("schedule_id")
+    context["db_schedule_id"] = 9
+
+    _dispatcher(client).dispatch(NotificationLevel.LECTURER_OPENED, context=context)
+
+    _url, _content, headers = client.last_request
+    assert "Presensi Sekarang" not in headers["Actions"]
+    assert "Izin" in headers["Actions"]

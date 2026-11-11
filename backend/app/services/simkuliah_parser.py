@@ -36,6 +36,10 @@ class ParsedMeetingStatus(BaseModel):
 
     ``is_open`` is ``False`` and every optional field is ``None`` when the
     lecturer has not opened presence yet (or the HTML is empty/malformed).
+    ``schedule_id`` is Simkuliah's own jadwal id (from the konfirmasi
+    button), which is what ``confirm_presence`` expects; it is NOT a
+    ``schedules.id`` from Supabase and must never be written to
+    ``meetings.schedule_id``.
     """
 
     is_open: bool
@@ -160,6 +164,11 @@ _DATE_RE = re.compile(r"tanggal\s*:\s*(?:[A-Za-z]+,\s*)?(\d{2})-(\d{2})-(\d{4})"
 _LECTURER_RE = re.compile(r"Nama\s*:\s*(.+?)(?:NIP|$)", re.DOTALL)
 _CLASS_GROUP_RE = re.compile(r"\(Kelas\s*:\s*([^)]+)\)")
 
+# A real presence deadline ("Batas Absen") is a wall-clock time such as
+# "08:31" or "08:31:00". The same cell reads "Dosen belum absen" while the
+# lecturer has not opened presence, which must never be treated as a time.
+_CLOCK_RE = re.compile(r"\d{1,2}[:.]\d{2}(?::\d{2})?")
+
 # Matrix cell background classes -> normalized simkuliah_status.
 _CELL_STATUS_CLASSES = (
     ("table-success", "hadir"),
@@ -273,20 +282,34 @@ def parse_attendance_cards(html: str) -> list[ParsedMeetingStatus]:
             status.is_open = True
 
         tbody = card.css_first("tbody")
+        deadline_time: str | None = None
         if tbody:
             tds = [td.text(strip=True) for td in tbody.css("td")]
             if len(tds) >= 5:
-                # Kelas, Gedung, Ruang, Jam, Batas Absen
-                status.deadline_time = tds[4]
+                # Kelas, Gedung, Ruang, Jam, Batas Absen. Only a real clock
+                # value means the lecturer opened presence; "Dosen belum
+                # absen" is the closed marker.
+                candidate = tds[4]
+                if _CLOCK_RE.fullmatch(candidate):
+                    deadline_time = candidate
+        status.deadline_time = deadline_time
 
         btn = card.css_first('button[id^="konfirmasi-kehadiran-"]')
         if btn:
-            status.is_open = True
+            # The button id is Simkuliah's own jadwal id (what
+            # confirm_presence must send), NOT the Supabase schedules.id.
             btn_id = btn.attributes.get("id", "")
             try:
                 status.schedule_id = int(btn_id.replace("konfirmasi-kehadiran-", ""))
             except ValueError:
                 pass
+
+        # A konfirmasi button alone is not proof of an open window: Simkuliah
+        # renders it even when "Batas Absen" says "Dosen belum absen". Open
+        # state comes from a real deadline (or from the student already
+        # having absen, which resolves the meeting).
+        if deadline_time is not None:
+            status.is_open = True
 
         statuses.append(status)
     return statuses
