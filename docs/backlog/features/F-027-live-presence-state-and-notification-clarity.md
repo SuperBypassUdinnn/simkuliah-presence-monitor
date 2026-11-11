@@ -44,6 +44,12 @@ Two owner-reported defects, fixed in this order:
    and raised `23502` (confirmed against the live database: three retries per
    card, new ids 1155-1157). The write must be an UPDATE on
    `(schedule_id, meeting_number)`; the matrix sync owns row creation.
+5. **Wall clocks were host-timezone dependent.** After the UPDATE fix, a UTC
+   host (Render) stamped the WIB "Batas Absen" 08:31 as `08:31+00:00`, which
+   the client reads as 15:31 WIB and re-opens a closed window; the poller's
+   naive `now` shifted the whole state machine by seven hours. Simkuliah
+   times are now interpreted and stamped in WIB (fixed UTC+7, no zoneinfo
+   dependency) via `app/core/time_zone.py`.
 
 ## 3. Implementation Checklist
 
@@ -55,6 +61,9 @@ Two owner-reported defects, fixed in this order:
       `meeting_number` overrides so callers can supply the Supabase ids while
       the card keeps Simkuliah's id, and updates the existing row instead of
       upserting a partial payload.
+- [x] Simkuliah wall clocks (schedule times, "Batas Absen", poller `now`) are
+      interpreted and stamped in WIB via `app/core/time_zone.py`, so deadline
+      instants are identical on UTC hosts and WIB workstations.
 - [x] Poller keeps two ids per meeting: `schedule_id` (Supabase, for meetings
       rows and override lookups) and `simkuliah_schedule_id` (for the
       `confirm_presence` action token). The dispatch context carries both as

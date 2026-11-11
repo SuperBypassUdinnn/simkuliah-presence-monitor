@@ -12,6 +12,7 @@ from typing import Any
 
 from supabase import create_client
 
+from app.core.time_zone import as_wib, now_wib
 from app.models.schemas import OverrideType
 from app.services.simkuliah_parser import ParsedMeetingStatus, ParsedScheduleItem
 
@@ -155,10 +156,11 @@ class DatabaseRepository:
         if resolved_schedule_id is None or resolved_meeting_number is None:
             return
 
-        # Naive wall-clock "now" (local machine = Simkuliah's WIB). Attaching
-        # the machine's offset keeps the stored instant unambiguous while the
-        # wall time matches what Simkuliah's "Batas Absen" expresses.
-        moment = (now or datetime.now()).astimezone()
+        # Simkuliah prints wall clocks, so "now" and the deadline must speak
+        # WIB regardless of the host's timezone (Render containers run UTC):
+        # storing 08:31 as UTC would tell the client the window closes at
+        # 15:31 WIB.
+        moment = as_wib(now) if now is not None else now_wib()
         payload: dict[str, Any] = {
             "schedule_id": resolved_schedule_id,
             "meeting_number": resolved_meeting_number,

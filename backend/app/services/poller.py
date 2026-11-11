@@ -15,6 +15,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app.core.database import DatabaseRepository
+from app.core.time_zone import naive_wib_now
 from app.services.ntfy_service import NtfyDispatcher
 from app.services.simkuliah_client import SimkuliahClient
 from app.services.simkuliah_parser import (
@@ -291,7 +292,10 @@ class AdaptivePoller:
             active_lectures.append((start_time, end_time))
 
         # Compute the adaptive interval and reschedule the job accordingly.
-        now = datetime.now()
+        # The WIB wall clock is authoritative: schedule times, "Batas Absen",
+        # and the state machine all speak WIB, while a UTC container would
+        # otherwise shift every comparison by seven hours.
+        now = naive_wib_now()
         interval = calculate_next_poll_interval(
             now, active_lectures, min_idle_interval_seconds=self._idle_interval()
         )

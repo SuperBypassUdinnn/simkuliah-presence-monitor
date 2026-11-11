@@ -11,6 +11,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.core.database import DatabaseRepository
+from app.core.time_zone import as_wib
 from app.models.schemas import OverrideType
 from app.services.simkuliah_parser import ParsedMeetingStatus, ParsedScheduleItem
 
@@ -78,11 +79,13 @@ async def test_record_meeting_status_upserts_live_state():
     payload = repo.client.table().update.call_args[0][0]
     assert payload["schedule_id"] == 1042
     assert payload["meeting_number"] == 12
-    assert payload["last_polled_at"] == now.astimezone().isoformat()
-    assert payload["lecturer_opened_at"] == now.astimezone().isoformat()
+    assert payload["last_polled_at"] == as_wib(now).isoformat()
+    assert payload["lecturer_opened_at"] == as_wib(now).isoformat()
     assert payload["simkuliah_status"] == "hadir"
-    # Deadline keeps the wall clock from Simkuliah with the local offset.
+    # Deadline keeps the wall clock from Simkuliah, stamped WIB: on a UTC
+    # host a naive stamp would read as 7 hours late and re-open the window.
     assert "T17:45:00" in payload["deadline_at"]
+    assert payload["deadline_at"].endswith("+07:00")
     # The row is matched on the (schedule_id, meeting_number) key; a partial
     # payload cannot be inserted because meeting_date is NOT NULL.
     update_mock = repo.client.table().update()
@@ -107,7 +110,7 @@ async def test_record_meeting_status_uses_explicit_database_ids():
     payload = repo.client.table().update.call_args[0][0]
     assert payload["schedule_id"] == 9
     assert payload["meeting_number"] == 11
-    assert payload["lecturer_opened_at"] == now.astimezone().isoformat()
+    assert payload["lecturer_opened_at"] == as_wib(now).isoformat()
 
 
 @pytest.mark.asyncio
