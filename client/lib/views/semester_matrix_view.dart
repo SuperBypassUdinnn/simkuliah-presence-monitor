@@ -97,6 +97,15 @@ class _SemesterMatrixViewState extends State<SemesterMatrixView> {
   static const int _meetingsPerCourse = 16;
   static const double _attendanceThreshold = 0.75;
 
+  // Column layout shared by the header and every course row, sized so the
+  // 16-column grid fits the default 1280x720 desktop window next to the
+  // 250px sidebar: 250 sidebar + 24 page padding + 16 row padding + 190
+  // name + 560 meetings + 12 gap + 130 recap = 1182 <= 1280.
+  static const double _nameColumnWidth = 190;
+  static const double _meetingColumnWidth = 35;
+  static const double _recapColumnWidth = 130;
+  static const double _recapGap = 12;
+
   List<MeetingModel> _mockMeetings(String courseName) {
     final statuses = <String>[
       'hadir',
@@ -145,7 +154,7 @@ class _SemesterMatrixViewState extends State<SemesterMatrixView> {
         mainAxisSize: MainAxisSize.min,
         children: [
           const SizedBox(
-            width: 240,
+            width: _nameColumnWidth,
             child: Text(
               'Mata Kuliah',
               style: TextStyle(fontWeight: FontWeight.bold),
@@ -153,7 +162,7 @@ class _SemesterMatrixViewState extends State<SemesterMatrixView> {
           ),
           ...List.generate(_meetingsPerCourse, (i) {
             return Container(
-              width: 38,
+              width: _meetingColumnWidth,
               alignment: Alignment.center,
               child: Text(
                 '${i + 1}',
@@ -164,9 +173,9 @@ class _SemesterMatrixViewState extends State<SemesterMatrixView> {
               ),
             );
           }),
-          const SizedBox(width: 12),
+          const SizedBox(width: _recapGap),
           const SizedBox(
-            width: 150,
+            width: _recapColumnWidth,
             child: Text(
               'Rekap Kehadiran',
               style: TextStyle(fontWeight: FontWeight.bold),
@@ -232,7 +241,7 @@ class _SemesterMatrixViewState extends State<SemesterMatrixView> {
         mainAxisSize: MainAxisSize.min,
         children: [
           SizedBox(
-            width: 240,
+            width: _nameColumnWidth,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
@@ -256,7 +265,7 @@ class _SemesterMatrixViewState extends State<SemesterMatrixView> {
           ),
           ...meetings.map((m) {
             return Container(
-              width: 38,
+              width: _meetingColumnWidth,
               alignment: Alignment.center,
               child: m == null
                   ? Text(
@@ -275,9 +284,9 @@ class _SemesterMatrixViewState extends State<SemesterMatrixView> {
                     ),
             );
           }),
-          const SizedBox(width: 12),
+          const SizedBox(width: _recapGap),
           SizedBox(
-            width: 150,
+            width: _recapColumnWidth,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
@@ -340,16 +349,7 @@ class _SemesterMatrixViewState extends State<SemesterMatrixView> {
     }
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Matriks Semester'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Segarkan',
-            onPressed: () => unawaited(_loadMatrix(silent: true)),
-          ),
-        ],
-      ),
+      appBar: AppBar(title: const Text('Matriks Semester')),
       body: _buildBody(context),
     );
   }

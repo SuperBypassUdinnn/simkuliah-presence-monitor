@@ -117,16 +117,7 @@ class _TodayFeedViewState extends State<TodayFeedView> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Jadwal Kuliah Hari Ini'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Segarkan',
-            onPressed: () => unawaited(_load(silent: true)),
-          ),
-        ],
-      ),
+      appBar: AppBar(title: const Text('Jadwal Kuliah Hari Ini')),
       body: _buildBody(context),
     );
   }

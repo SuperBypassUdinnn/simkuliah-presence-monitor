@@ -86,16 +86,7 @@ class _ActivePresenceViewState extends State<ActivePresenceView> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Presensi Aktif'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Segarkan',
-            onPressed: () => unawaited(_load(silent: true)),
-          ),
-        ],
-      ),
+      appBar: AppBar(title: const Text('Presensi Aktif')),
       body: _buildBody(context),
     );
   }

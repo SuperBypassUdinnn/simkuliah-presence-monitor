@@ -101,7 +101,7 @@ class DatabaseRepository:
                 {
                     "course_code": item.course_code,
                     "course_name": item.course_name,
-                    "class_group": "A",
+                    "class_group": item.class_group,
                     "lecturer_name": item.lecturer,
                     "day_of_week": 1,
                     "start_time": item.start_time,

@@ -336,9 +336,13 @@ class AdaptivePoller:
 
                 # Cards without a konfirmasi button (e.g. "anda sudah
                 # absen") carry no schedule id; resolve it from the course.
+                # The parsed class group is authoritative: defaulting to A
+                # would miss every course whose real group differs.
                 if schedule_id is None:
                     try:
-                        schedule_id = await self.repo.resolve_schedule_id(item.course_code)
+                        schedule_id = await self.repo.resolve_schedule_id(
+                            item.course_code, item.class_group
+                        )
                     except Exception:  # noqa: BLE001 - non-fatal
                         schedule_id = None
 

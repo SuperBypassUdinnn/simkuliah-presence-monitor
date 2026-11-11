@@ -24,6 +24,11 @@ class ParsedScheduleItem(BaseModel):
     start_time: str
     end_time: str
     lecturer: str
+    # Class group parsed from the row's "(Kelas : X)" paren. The schedule
+    # table carries it exactly like the meeting matrix does; defaulting to
+    # "A" would phantom-create a second schedule row for every course whose
+    # real group is not A (the row key includes class_group).
+    class_group: str = "A"
 
 
 class ParsedMeetingStatus(BaseModel):
@@ -88,6 +93,10 @@ def parse_daily_schedule(html: str) -> list[ParsedScheduleItem]:
             code = tds[0].text(strip=True)
             raw_name = tds[1].text(strip=True)
             course_name = re.sub(r"\(.*?\)", "", raw_name).strip()
+            # The row's "(Kelas : X)" paren identifies the real class group;
+            # dropping it used to upsert every course as group A, creating a
+            # phantom schedule row for courses whose real group differs.
+            m_group = _CLASS_GROUP_RE.search(raw_name)
 
             # Extract meeting details from cells
             start_time = "08:00"
@@ -119,6 +128,7 @@ def parse_daily_schedule(html: str) -> list[ParsedScheduleItem]:
                     start_time=start_time,
                     end_time=end_time,
                     lecturer=lecturer,
+                    class_group=m_group.group(1).strip() if m_group else "A",
                 )
             )
         if items:
