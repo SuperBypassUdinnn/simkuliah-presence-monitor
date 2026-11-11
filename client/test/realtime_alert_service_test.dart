@@ -337,5 +337,34 @@ void main() {
 
       expect(find.text('Presensi Ditutup'), findsNothing);
     });
+
+    test('processMeetings invokes onDismissAlert when meeting resolves', () {
+      final dismissed = <({int meetingId, PresenceAlertKind kind})>[];
+      service.processMeetings(
+        meetings: [
+          _meeting(id: 7, deadline: base.add(const Duration(minutes: 45))),
+        ],
+        onAlert: (_) => 1,
+        onDismissAlert: (id, kind) =>
+            dismissed.add((meetingId: id, kind: kind)),
+        clock: clock,
+      );
+
+      service.processMeetings(
+        meetings: [
+          _meeting(
+            id: 7,
+            deadline: base.add(const Duration(minutes: 45)),
+            status: 'hadir',
+          ),
+        ],
+        onAlert: (_) => 2,
+        onDismissAlert: (id, kind) =>
+            dismissed.add((meetingId: id, kind: kind)),
+        clock: clock,
+      );
+
+      expect(dismissed.any((d) => d.meetingId == 7), isTrue);
+    });
   });
 }

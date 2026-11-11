@@ -15,6 +15,7 @@ import 'core/firebase_config.dart';
 import 'core/refresh_bus.dart';
 import 'core/supabase_config.dart';
 import 'services/android_background_service.dart';
+import 'services/desktop_notification_service.dart';
 import 'services/push_notification_service.dart';
 import 'services/realtime_alert_service.dart';
 import 'views/active_presence_view.dart';
@@ -120,7 +121,10 @@ class _MainHomeScreenState extends State<MainHomeScreen>
           return;
         }
         final service = RealtimeAlertService();
-        service.start(onAlert: _showRealtimeAlert);
+        service.start(
+          onAlert: _showRealtimeAlert,
+          onDismissAlert: _dismissNativeNotification,
+        );
         setState(() {
           _alertService = service;
         });
@@ -128,6 +132,16 @@ class _MainHomeScreenState extends State<MainHomeScreen>
     }
     if (!kIsWeb && (Platform.isLinux || Platform.isWindows)) {
       unawaited(_setupDesktopBackground());
+    }
+    if (!kIsWeb && Platform.isLinux) {
+      unawaited(
+        DesktopNotificationService.instance.initialize(
+          onNotificationTap: () async {
+            await windowManager.show();
+            await windowManager.focus();
+          },
+        ),
+      );
     }
   }
 
@@ -222,11 +236,12 @@ class _MainHomeScreenState extends State<MainHomeScreen>
     }
   }
 
-  /// Render one realtime alert in the overlay. Urgent alerts (lecturer opened
+  /// Render one realtime alert in the overlay and dispatch a native desktop
+  /// notification (KDE Plasma / D-Bus). Urgent alerts (lecturer opened
   /// presence, window closing) are sticky: no auto-dismiss, close button only.
   int _showRealtimeAlert(PresenceAlert alert) {
     final scheme = Theme.of(context).colorScheme;
-    return AppNotification.show(
+    final inAppId = AppNotification.show(
       context,
       title: alert.title,
       message: alert.message,
@@ -235,6 +250,29 @@ class _MainHomeScreenState extends State<MainHomeScreen>
           ? Icons.notification_important_rounded
           : Icons.info_outline,
       duration: alert.urgent ? Duration.zero : const Duration(seconds: 4),
+    );
+
+    // Native desktop notification (KDE Plasma on Linux).
+    unawaited(
+      DesktopNotificationService.instance.showNotification(
+        id: DesktopNotificationService.notificationId(
+          alert.meetingId,
+          alert.kind.index,
+        ),
+        title: alert.title,
+        body: alert.message,
+        urgent: alert.urgent,
+      ),
+    );
+
+    return inAppId;
+  }
+
+  void _dismissNativeNotification(int meetingId, PresenceAlertKind kind) {
+    unawaited(
+      DesktopNotificationService.instance.cancel(
+        DesktopNotificationService.notificationId(meetingId, kind.index),
+      ),
     );
   }
 

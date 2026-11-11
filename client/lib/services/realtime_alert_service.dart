@@ -248,6 +248,7 @@ class RealtimeAlertService {
   /// once; further calls are no-ops.
   void start({
     required int Function(PresenceAlert alert) onAlert,
+    void Function(int meetingId, PresenceAlertKind kind)? onDismissAlert,
     DateTime Function()? clock,
   }) {
     if (_subscription != null) {
@@ -266,7 +267,12 @@ class RealtimeAlertService {
         .stream(primaryKey: ['id'])
         .eq('meeting_date', dateStr)
         .listen(
-          (rows) => _handleRows(rows, onAlert: onAlert, clock: clock),
+          (rows) => _handleRows(
+            rows,
+            onAlert: onAlert,
+            onDismissAlert: onDismissAlert,
+            clock: clock,
+          ),
           onError: (Object error) =>
               debugPrint('Realtime alert stream error: $error'),
         );
@@ -275,7 +281,12 @@ class RealtimeAlertService {
     // when no row changes arrive; the realtime poller updates rows regularly,
     // so this is a safety net at a slow cadence.
     _timer = Timer.periodic(const Duration(seconds: 30), (_) {
-      _evaluate(_lastMeetings, onAlert: onAlert, clock: clock);
+      _evaluate(
+        _lastMeetings,
+        onAlert: onAlert,
+        onDismissAlert: onDismissAlert,
+        clock: clock,
+      );
     });
   }
 
@@ -291,24 +302,37 @@ class RealtimeAlertService {
   void processMeetings({
     required List<MeetingModel> meetings,
     required int Function(PresenceAlert alert) onAlert,
+    void Function(int meetingId, PresenceAlertKind kind)? onDismissAlert,
     DateTime Function()? clock,
   }) {
-    _evaluate(meetings, onAlert: onAlert, clock: clock);
+    _evaluate(
+      meetings,
+      onAlert: onAlert,
+      onDismissAlert: onDismissAlert,
+      clock: clock,
+    );
   }
 
   void _handleRows(
     List<Map<String, dynamic>> rows, {
     required int Function(PresenceAlert alert) onAlert,
+    void Function(int meetingId, PresenceAlertKind kind)? onDismissAlert,
     DateTime Function()? clock,
   }) {
     final meetings = rows.map(MeetingModel.fromJson).toList()
       ..sort((a, b) => a.id.compareTo(b.id));
-    _evaluate(meetings, onAlert: onAlert, clock: clock);
+    _evaluate(
+      meetings,
+      onAlert: onAlert,
+      onDismissAlert: onDismissAlert,
+      clock: clock,
+    );
   }
 
   void _evaluate(
     List<MeetingModel> meetings, {
     required int Function(PresenceAlert alert) onAlert,
+    void Function(int meetingId, PresenceAlertKind kind)? onDismissAlert,
     DateTime Function()? clock,
   }) {
     _lastMeetings = meetings;
@@ -333,6 +357,7 @@ class RealtimeAlertService {
         final banner = _bannerIds.remove('$id:${kind.name}');
         if (banner != null) {
           AppNotification.dismiss(banner);
+          onDismissAlert?.call(id, kind);
         }
       }
     }
@@ -348,6 +373,7 @@ class RealtimeAlertService {
           final previous = _bannerIds.remove('${alert.meetingId}:${kind.name}');
           if (previous != null) {
             AppNotification.dismiss(previous);
+            onDismissAlert?.call(alert.meetingId, kind);
           }
         }
       }
