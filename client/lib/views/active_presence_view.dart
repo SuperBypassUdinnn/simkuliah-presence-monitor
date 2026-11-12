@@ -5,6 +5,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../core/load_epoch_guard.dart';
 import '../core/refresh_bus.dart';
 import '../models/meeting_model.dart';
 import '../services/presence_service.dart';
@@ -24,11 +25,11 @@ class ActivePresenceView extends StatefulWidget {
 
 class _ActivePresenceViewState extends State<ActivePresenceView> {
   late final PresenceService _service;
+  final LoadEpochGuard _loadGuard = LoadEpochGuard();
   StreamSubscription<void>? _refreshSub;
   List<MeetingModel>? _meetings;
   bool _loading = true;
   Object? _error;
-  bool _fetchInFlight = false;
 
   @override
   void initState() {
@@ -36,7 +37,7 @@ class _ActivePresenceViewState extends State<ActivePresenceView> {
     _service = widget.presenceService ?? PresenceService();
     unawaited(_load(silent: false));
     _refreshSub = RefreshBus.instance.stream.listen(
-      (_) => unawaited(_load(silent: true)),
+      (_) => unawaited(_load(silent: _meetings != null, force: true)),
     );
   }
 
@@ -49,9 +50,12 @@ class _ActivePresenceViewState extends State<ActivePresenceView> {
   /// Fetch today's meetings. [silent] keeps any cached data on screen and
   /// swaps it in place when the fetch completes, so a focus-driven refresh
   /// never flashes a loading spinner.
-  Future<void> _load({required bool silent}) async {
-    if (_fetchInFlight) return;
-    _fetchInFlight = true;
+  Future<void> _load({required bool silent, bool force = false}) async {
+    final epoch = _loadGuard.tryBegin(
+      timeout: _service.requestTimeout,
+      force: force,
+    );
+    if (epoch == null) return;
     if (!silent || _meetings == null) {
       setState(() {
         _loading = true;
@@ -62,16 +66,16 @@ class _ActivePresenceViewState extends State<ActivePresenceView> {
       final meetings = await _service.fetchTodaysMeetings(
         today: DateTime.now(),
       );
-      if (!mounted) return;
+      if (!mounted || !_loadGuard.isCurrent(epoch)) return;
       setState(() {
         _meetings = meetings;
         _loading = false;
         _error = null;
       });
     } catch (error) {
-      if (!mounted) return;
-      // A failed silent refresh keeps the stale view; only the very first
-      // load surfaces the error screen.
+      if (!mounted || !_loadGuard.isCurrent(epoch)) return;
+      // A failed silent refresh keeps the stale view; only when no cached
+      // data exists do we surface the error screen.
       if (_meetings == null) {
         setState(() {
           _loading = false;
@@ -79,7 +83,7 @@ class _ActivePresenceViewState extends State<ActivePresenceView> {
         });
       }
     } finally {
-      _fetchInFlight = false;
+      _loadGuard.complete(epoch);
     }
   }
 
@@ -99,7 +103,7 @@ class _ActivePresenceViewState extends State<ActivePresenceView> {
       return ErrorStateView(
         title: 'Gagal memuat status presensi',
         error: _error,
-        onRetry: () => unawaited(_load(silent: false)),
+        onRetry: () => unawaited(_load(silent: false, force: true)),
       );
     }
 
@@ -145,7 +149,7 @@ class _ActivePresenceViewState extends State<ActivePresenceView> {
               OutlinedButton.icon(
                 icon: const Icon(Icons.refresh),
                 label: const Text('Periksa Ulang'),
-                onPressed: () => unawaited(_load(silent: true)),
+                onPressed: () => unawaited(_load(silent: true, force: true)),
               ),
             ],
           ),
@@ -154,8 +158,9 @@ class _ActivePresenceViewState extends State<ActivePresenceView> {
     }
 
     return RefreshIndicator(
-      onRefresh: () => _load(silent: true),
+      onRefresh: () => _load(silent: true, force: true),
       child: ListView.builder(
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(16),
         itemCount: activeMeetings.length,
         itemBuilder: (context, index) {
@@ -164,7 +169,8 @@ class _ActivePresenceViewState extends State<ActivePresenceView> {
             child: ActiveLectureCard(
               meeting: activeMeetings[index],
               presenceService: _service,
-              onStatusChanged: () => unawaited(_load(silent: true)),
+              onStatusChanged: () =>
+                  unawaited(_load(silent: true, force: true)),
               allowPresenceConfirmation: true,
             ),
           );

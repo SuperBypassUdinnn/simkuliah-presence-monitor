@@ -3,6 +3,7 @@
 /// Key Components: PresenceService
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show SocketException;
 
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -18,6 +19,7 @@ class PresenceService {
     SupabaseClient? client,
     http.Client? httpClient,
     String? apiBaseUrl,
+    this.requestTimeout = const Duration(seconds: 10),
   }) : _customClient = client,
        _customHttpClient = httpClient,
        _customApiBaseUrl = apiBaseUrl;
@@ -25,6 +27,7 @@ class PresenceService {
   final SupabaseClient? _customClient;
   final http.Client? _customHttpClient;
   final String? _customApiBaseUrl;
+  final Duration requestTimeout;
 
   static const String _envApiBaseUrl = String.fromEnvironment(
     'SIMKULIAH_API_BASE_URL',
@@ -40,6 +43,29 @@ class PresenceService {
   static const String _tableSchedules = 'schedules';
   static const String _tableMeetings = 'meetings';
   static const String _tableOverrides = 'local_overrides';
+
+  static const Duration _retryDelay = Duration(milliseconds: 300);
+
+  /// Run [action] with a hard request deadline and optional single fast retry
+  /// on transient network faults (half-open sockets after a long outage,
+  /// brief timeouts, or connection resets).
+  Future<T> _runWithResilience<T>(
+    Future<T> Function() action, {
+    bool retry = true,
+  }) async {
+    for (var attempt = 1; ; attempt++) {
+      try {
+        return await action().timeout(requestTimeout);
+      } on TimeoutException {
+        if (!retry || attempt >= 2) rethrow;
+      } on SocketException {
+        if (!retry || attempt >= 2) rethrow;
+      } on http.ClientException {
+        if (!retry || attempt >= 2) rethrow;
+      }
+      await Future<void>.delayed(_retryDelay);
+    }
+  }
 
   /// Stream of today's meetings, updated in real time via Supabase Realtime.
   Stream<List<MeetingModel>> watchTodaysMeetings({required DateTime today}) {
@@ -58,10 +84,12 @@ class PresenceService {
   }) async {
     final dateStr =
         '${today.year.toString().padLeft(4, '0')}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
-    final response = await _client
-        .from(_tableMeetings)
-        .select('*, schedules(*), local_overrides(*)')
-        .eq('meeting_date', dateStr);
+    final response = await _runWithResilience<List<Map<String, dynamic>>>(
+      () async => await _client
+          .from(_tableMeetings)
+          .select('*, schedules(*), local_overrides(*)')
+          .eq('meeting_date', dateStr),
+    );
 
     final meetings = response.map(MeetingModel.fromJson).toList();
     meetings.sort((a, b) {
@@ -74,10 +102,12 @@ class PresenceService {
 
   /// Fetch the full semester schedule matrix with all nested meetings.
   Future<List<ScheduleModel>> fetchSemesterMatrix() async {
-    final response = await _client
-        .from(_tableSchedules)
-        .select('*, meetings(*, local_overrides(*))')
-        .order('course_code');
+    final response = await _runWithResilience<List<Map<String, dynamic>>>(
+      () async => await _client
+          .from(_tableSchedules)
+          .select('*, meetings(*, local_overrides(*))')
+          .order('course_code'),
+    );
     return response.map(ScheduleModel.fromJson).toList();
   }
 
@@ -85,11 +115,13 @@ class PresenceService {
   Future<List<MeetingModel>> fetchMeetingsForSchedule({
     required int scheduleId,
   }) async {
-    final response = await _client
-        .from(_tableMeetings)
-        .select('*, schedules(*), local_overrides(*)')
-        .eq('schedule_id', scheduleId)
-        .order('meeting_number');
+    final response = await _runWithResilience<List<Map<String, dynamic>>>(
+      () async => await _client
+          .from(_tableMeetings)
+          .select('*, schedules(*), local_overrides(*)')
+          .eq('schedule_id', scheduleId)
+          .order('meeting_number'),
+    );
     return response.map(MeetingModel.fromJson).toList();
   }
 
@@ -99,16 +131,22 @@ class PresenceService {
     required String overrideType,
     String note = '',
   }) async {
-    await _client.from(_tableOverrides).upsert({
-      'meeting_id': meetingId,
-      'override_type': overrideType.toLowerCase(),
-      'note': note,
-    }, onConflict: 'meeting_id');
+    await _runWithResilience<void>(
+      () => _client.from(_tableOverrides).upsert({
+        'meeting_id': meetingId,
+        'override_type': overrideType.toLowerCase(),
+        'note': note,
+      }, onConflict: 'meeting_id'),
+      retry: false,
+    );
   }
 
   /// Delete/clear local override for a meeting.
   Future<void> clearOverride({required int meetingId}) async {
-    await _client.from(_tableOverrides).delete().eq('meeting_id', meetingId);
+    await _runWithResilience<void>(
+      () => _client.from(_tableOverrides).delete().eq('meeting_id', meetingId),
+      retry: false,
+    );
   }
 
   /// Confirm presence on Simkuliah through the backend gateway.

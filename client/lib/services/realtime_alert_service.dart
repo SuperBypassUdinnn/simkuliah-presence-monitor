@@ -5,6 +5,7 @@
 /// Key Components: RealtimeAlertService, PresenceAlert, PresenceAlertKind,
 /// RealtimeAlertEvaluator
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -223,13 +224,29 @@ class RealtimeAlertService {
   RealtimeAlertService({
     SupabaseClient? client,
     PresenceService? presenceService,
+    Stream<List<Map<String, dynamic>>> Function(String dateStr)? streamFactory,
+    Duration baseReconnectDelay = const Duration(seconds: 2),
   }) : _customClient = client,
-       _customPresenceService = presenceService;
+       _customPresenceService = presenceService,
+       _customStreamFactory = streamFactory,
+       _reconnectBaseDelay = baseReconnectDelay;
 
   final SupabaseClient? _customClient;
   final PresenceService? _customPresenceService;
+  final Stream<List<Map<String, dynamic>>> Function(String dateStr)?
+  _customStreamFactory;
+  final Duration _reconnectBaseDelay;
   StreamSubscription<List<Map<String, dynamic>>>? _subscription;
   Timer? _timer;
+  Timer? _reconnectTimer;
+  bool _running = false;
+  int _reconnectAttempts = 0;
+  final math.Random _rng = math.Random();
+
+  static const Duration _maxReconnectDelay = Duration(seconds: 60);
+
+  @visibleForTesting
+  int get reconnectAttempts => _reconnectAttempts;
 
   /// Dedupe keys already surfaced this session.
   @visibleForTesting
@@ -258,40 +275,118 @@ class RealtimeAlertService {
     void Function(int meetingId, PresenceAlertKind kind)? onDismissAlert,
     DateTime Function()? clock,
   }) {
-    if (_subscription != null) {
+    if (_running) {
       return;
     }
+    _running = true;
     _startedAt = DateTime.now();
+    _reconnectAttempts = 0;
 
-    final today = DateTime.now();
+    _subscribeStream(
+      onAlert: onAlert,
+      onDismissAlert: onDismissAlert,
+      clock: clock,
+    );
+
+    // Time-driven transitions (urgent phase entry) need re-evaluation even
+    // when no row changes arrive; if the stream died without an active
+    // reconnect timer, kick off a fresh subscription.
+    _timer = Timer.periodic(const Duration(seconds: 30), (_) {
+      _evaluate(
+        _lastMeetings,
+        onAlert: onAlert,
+        onDismissAlert: onDismissAlert,
+        clock: clock,
+      );
+      if (_running &&
+          _subscription == null &&
+          !(_reconnectTimer?.isActive ?? false)) {
+        _subscribeStream(
+          onAlert: onAlert,
+          onDismissAlert: onDismissAlert,
+          clock: clock,
+        );
+      }
+    });
+  }
+
+  void _subscribeStream({
+    required int Function(PresenceAlert alert) onAlert,
+    void Function(int meetingId, PresenceAlertKind kind)? onDismissAlert,
+    DateTime Function()? clock,
+  }) {
+    if (!_running) {
+      return;
+    }
+    unawaited(_subscription?.cancel());
+    _subscription = null;
+
+    final today = clock?.call() ?? DateTime.now();
     final dateStr =
         '${today.year.toString().padLeft(4, '0')}-'
         '${today.month.toString().padLeft(2, '0')}-'
         '${today.day.toString().padLeft(2, '0')}';
 
-    _subscription = _client
-        .from('meetings')
-        .stream(primaryKey: ['id'])
-        .eq('meeting_date', dateStr)
-        .listen(
-          (rows) => unawaited(
-            _handleRows(
-              rows,
-              onAlert: onAlert,
-              onDismissAlert: onDismissAlert,
-              clock: clock,
-            ),
-          ),
-          onError: (Object error) =>
-              debugPrint('Realtime alert stream error: $error'),
-        );
+    final stream = _customStreamFactory != null
+        ? _customStreamFactory(dateStr)
+        : _client
+              .from('meetings')
+              .stream(primaryKey: ['id'])
+              .eq('meeting_date', dateStr);
 
-    // Time-driven transitions (urgent phase entry) need re-evaluation even
-    // when no row changes arrive; the realtime poller updates rows regularly,
-    // so this is a safety net at a slow cadence.
-    _timer = Timer.periodic(const Duration(seconds: 30), (_) {
-      _evaluate(
-        _lastMeetings,
+    _subscription = stream.listen(
+      (rows) => unawaited(
+        _handleRows(
+          rows,
+          onAlert: onAlert,
+          onDismissAlert: onDismissAlert,
+          clock: clock,
+        ),
+      ),
+      onError: (Object error) {
+        debugPrint('Realtime alert stream error: $error');
+        _subscription = null;
+        _scheduleReconnect(
+          onAlert: onAlert,
+          onDismissAlert: onDismissAlert,
+          clock: clock,
+        );
+      },
+      onDone: () {
+        debugPrint('Realtime alert stream closed; scheduling reconnect');
+        _subscription = null;
+        _scheduleReconnect(
+          onAlert: onAlert,
+          onDismissAlert: onDismissAlert,
+          clock: clock,
+        );
+      },
+    );
+  }
+
+  void _scheduleReconnect({
+    required int Function(PresenceAlert alert) onAlert,
+    void Function(int meetingId, PresenceAlertKind kind)? onDismissAlert,
+    DateTime Function()? clock,
+  }) {
+    if (!_running) {
+      return;
+    }
+    // Single-timer guard prevents error + done from scheduling two timers.
+    if (_reconnectTimer?.isActive ?? false) {
+      return;
+    }
+    final factor = 1 << math.min(_reconnectAttempts, 5);
+    final rawMs = _reconnectBaseDelay.inMilliseconds * factor;
+    final cappedMs = math.min(_maxReconnectDelay.inMilliseconds, rawMs);
+    final jitterMs = _reconnectBaseDelay.inMilliseconds > 0
+        ? _rng.nextInt(math.max(1, _reconnectBaseDelay.inMilliseconds ~/ 4))
+        : 0;
+    _reconnectAttempts++;
+
+    _reconnectTimer = Timer(Duration(milliseconds: cappedMs + jitterMs), () {
+      _reconnectTimer = null;
+      _subscribeStream(
         onAlert: onAlert,
         onDismissAlert: onDismissAlert,
         clock: clock,
@@ -300,6 +395,9 @@ class RealtimeAlertService {
   }
 
   Future<void> stop() async {
+    _running = false;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     await _subscription?.cancel();
     _subscription = null;
     _timer?.cancel();
@@ -339,9 +437,11 @@ class RealtimeAlertService {
       meetings = rows.map(MeetingModel.fromJson).toList()
         ..sort((a, b) => a.id.compareTo(b.id));
     }
-    if (_subscription == null) {
+    if (!_running || _subscription == null) {
       return;
     }
+    // Reset backoff only after a live snapshot is processed cleanly.
+    _reconnectAttempts = 0;
     _evaluate(
       meetings,
       onAlert: onAlert,
