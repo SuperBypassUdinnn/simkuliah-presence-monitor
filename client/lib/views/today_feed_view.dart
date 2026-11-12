@@ -5,6 +5,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../core/load_epoch_guard.dart';
 import '../core/refresh_bus.dart';
 import '../models/meeting_model.dart';
 import '../services/backend_health_service.dart';
@@ -33,12 +34,12 @@ class TodayFeedView extends StatefulWidget {
 class _TodayFeedViewState extends State<TodayFeedView> {
   late final PresenceService _service;
   late final BackendHealthService _healthService;
+  final LoadEpochGuard _loadGuard = LoadEpochGuard();
   StreamSubscription<void>? _refreshSub;
   Timer? _keepAliveTimer;
   List<MeetingModel>? _meetings;
   bool _loading = true;
   Object? _error;
-  bool _fetchInFlight = false;
   BackendHealthResult? _health;
   DateTime? _lastHealthCheckAt;
 
@@ -50,15 +51,16 @@ class _TodayFeedViewState extends State<TodayFeedView> {
     unawaited(_load(silent: false));
     unawaited(_checkHealth());
     _refreshSub = RefreshBus.instance.stream.listen((_) {
-      unawaited(_load(silent: true));
+      unawaited(_load(silent: _meetings != null, force: true));
       unawaited(_checkHealth());
     });
     if (_healthService.isConfigured) {
       // Keep the free-tier Render container warm (15-min idle sleep) while
-      // the desktop tray or app is running, without forcing upstream scrapes.
+      // the desktop tray or app is running, and trigger view recovery if
+      // connectivity just returned after an outage.
       _keepAliveTimer = Timer.periodic(
         const Duration(minutes: 5),
-        (_) => unawaited(_healthService.keepAlive()),
+        (_) => unawaited(_runKeepAlive()),
       );
     }
   }
@@ -70,11 +72,24 @@ class _TodayFeedViewState extends State<TodayFeedView> {
     super.dispose();
   }
 
+  Future<void> _runKeepAlive() async {
+    final wasDown = _health?.status == BackendHealthStatus.backendDown;
+    final result = await _healthService.keepAlive();
+    if (!mounted) return;
+    setState(() {
+      _health = result;
+    });
+    if ((wasDown && result.status == BackendHealthStatus.ok) ||
+        (_meetings == null && result.status == BackendHealthStatus.ok)) {
+      RefreshBus.instance.requestRefresh();
+    }
+  }
+
   /// Probe backend and Simkuliah health for the warning banner and wake a
   /// stale poller on demand. Refresh-bus events can fire in bursts, so
   /// rechecks are throttled to once per 30 seconds; when the backend runs a
-  /// fresh sync (`syncedNow`), broadcast a refresh so every mounted view reads
-  /// the newly written state.
+  /// fresh sync (`syncedNow`) or recovers from an outage, broadcast a refresh
+  /// so every mounted view reads the newly written state.
   Future<void> _checkHealth() async {
     final last = _lastHealthCheckAt;
     if (last != null &&
@@ -82,12 +97,14 @@ class _TodayFeedViewState extends State<TodayFeedView> {
       return;
     }
     _lastHealthCheckAt = DateTime.now();
+    final wasDown = _health?.status == BackendHealthStatus.backendDown;
     final result = await _healthService.check();
     if (!mounted) return;
     setState(() {
       _health = result;
     });
-    if (result.syncedNow) {
+    if (result.syncedNow ||
+        (wasDown && result.status == BackendHealthStatus.ok)) {
       RefreshBus.instance.requestRefresh();
     }
   }
@@ -95,9 +112,12 @@ class _TodayFeedViewState extends State<TodayFeedView> {
   /// Fetch today's meetings. [silent] keeps any cached data on screen and
   /// swaps it in place when the fetch completes, so a focus-driven refresh
   /// never flashes a loading spinner.
-  Future<void> _load({required bool silent}) async {
-    if (_fetchInFlight) return;
-    _fetchInFlight = true;
+  Future<void> _load({required bool silent, bool force = false}) async {
+    final epoch = _loadGuard.tryBegin(
+      timeout: _service.requestTimeout,
+      force: force,
+    );
+    if (epoch == null) return;
     if (!silent || _meetings == null) {
       setState(() {
         _loading = true;
@@ -108,16 +128,16 @@ class _TodayFeedViewState extends State<TodayFeedView> {
       final meetings = await _service.fetchTodaysMeetings(
         today: DateTime.now(),
       );
-      if (!mounted) return;
+      if (!mounted || !_loadGuard.isCurrent(epoch)) return;
       setState(() {
         _meetings = meetings;
         _loading = false;
         _error = null;
       });
     } catch (error) {
-      if (!mounted) return;
-      // A failed silent refresh keeps the stale view; only the very first
-      // load surfaces the error screen.
+      if (!mounted || !_loadGuard.isCurrent(epoch)) return;
+      // A failed silent refresh keeps the stale view; only when no cached
+      // data exists do we surface the error screen.
       if (_meetings == null) {
         setState(() {
           _loading = false;
@@ -125,7 +145,7 @@ class _TodayFeedViewState extends State<TodayFeedView> {
         });
       }
     } finally {
-      _fetchInFlight = false;
+      _loadGuard.complete(epoch);
     }
   }
 
@@ -145,7 +165,7 @@ class _TodayFeedViewState extends State<TodayFeedView> {
       return ErrorStateView(
         title: 'Gagal memuat jadwal',
         error: _error,
-        onRetry: () => unawaited(_load(silent: false)),
+        onRetry: () => unawaited(_load(silent: false, force: true)),
       );
     }
     final meetings = _meetings ?? const <MeetingModel>[];
@@ -173,8 +193,9 @@ class _TodayFeedViewState extends State<TodayFeedView> {
       );
     }
     return RefreshIndicator(
-      onRefresh: () => _load(silent: true),
+      onRefresh: () => _load(silent: true, force: true),
       child: ListView.builder(
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(16),
         itemCount: meetings.length + 1,
         itemBuilder: (context, index) {
@@ -196,7 +217,8 @@ class _TodayFeedViewState extends State<TodayFeedView> {
             child: ActiveLectureCard(
               meeting: meeting,
               presenceService: _service,
-              onStatusChanged: () => unawaited(_load(silent: true)),
+              onStatusChanged: () =>
+                  unawaited(_load(silent: true, force: true)),
               allowPresenceConfirmation: false,
             ),
           );

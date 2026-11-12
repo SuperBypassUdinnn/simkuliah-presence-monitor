@@ -5,6 +5,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../core/load_epoch_guard.dart';
 import '../core/refresh_bus.dart';
 import '../models/meeting_model.dart';
 import '../models/schedule_model.dart';
@@ -34,11 +35,11 @@ class SemesterMatrixView extends StatefulWidget {
 }
 
 class _SemesterMatrixViewState extends State<SemesterMatrixView> {
+  final LoadEpochGuard _loadGuard = LoadEpochGuard();
   StreamSubscription<void>? _refreshSub;
   List<ScheduleModel>? _courses;
   bool _loading = true;
   Object? _error;
-  bool _fetchInFlight = false;
   late PresenceService _service;
 
   @override
@@ -48,7 +49,7 @@ class _SemesterMatrixViewState extends State<SemesterMatrixView> {
     if (!widget.testMode) {
       unawaited(_loadMatrix(silent: false));
       _refreshSub = RefreshBus.instance.stream.listen(
-        (_) => unawaited(_loadMatrix(silent: true)),
+        (_) => unawaited(_loadMatrix(silent: _courses != null, force: true)),
       );
     }
   }
@@ -62,9 +63,12 @@ class _SemesterMatrixViewState extends State<SemesterMatrixView> {
   /// Fetch the semester matrix. [silent] keeps any cached data on screen and
   /// swaps it in place when the fetch completes, so a focus-driven refresh
   /// never flashes a loading spinner.
-  Future<void> _loadMatrix({required bool silent}) async {
-    if (_fetchInFlight) return;
-    _fetchInFlight = true;
+  Future<void> _loadMatrix({required bool silent, bool force = false}) async {
+    final epoch = _loadGuard.tryBegin(
+      timeout: _service.requestTimeout,
+      force: force,
+    );
+    if (epoch == null) return;
     if (!silent || _courses == null) {
       setState(() {
         _loading = true;
@@ -73,16 +77,16 @@ class _SemesterMatrixViewState extends State<SemesterMatrixView> {
     }
     try {
       final courses = await _service.fetchSemesterMatrix();
-      if (!mounted) return;
+      if (!mounted || !_loadGuard.isCurrent(epoch)) return;
       setState(() {
         _courses = courses;
         _loading = false;
         _error = null;
       });
     } catch (error) {
-      if (!mounted) return;
-      // A failed silent refresh keeps the stale view; only the very first
-      // load surfaces the error screen.
+      if (!mounted || !_loadGuard.isCurrent(epoch)) return;
+      // A failed silent refresh keeps the stale view; only when no cached
+      // data exists do we surface the error screen.
       if (_courses == null) {
         setState(() {
           _loading = false;
@@ -90,7 +94,7 @@ class _SemesterMatrixViewState extends State<SemesterMatrixView> {
         });
       }
     } finally {
-      _fetchInFlight = false;
+      _loadGuard.complete(epoch);
     }
   }
 
@@ -280,7 +284,7 @@ class _SemesterMatrixViewState extends State<SemesterMatrixView> {
                       compact: true,
                       presenceService: _service,
                       onOverrideChanged: () =>
-                          unawaited(_loadMatrix(silent: true)),
+                          unawaited(_loadMatrix(silent: true, force: true)),
                     ),
             );
           }),
@@ -362,7 +366,7 @@ class _SemesterMatrixViewState extends State<SemesterMatrixView> {
       return ErrorStateView(
         title: 'Gagal memuat matriks semester',
         error: _error,
-        onRetry: () => unawaited(_loadMatrix(silent: false)),
+        onRetry: () => unawaited(_loadMatrix(silent: false, force: true)),
       );
     }
 
@@ -371,18 +375,22 @@ class _SemesterMatrixViewState extends State<SemesterMatrixView> {
       return const Center(child: Text('Belum ada data jadwal semester.'));
     }
 
-    return SingleChildScrollView(
-      scrollDirection: Axis.vertical,
-      padding: const EdgeInsets.all(12),
+    return RefreshIndicator(
+      onRefresh: () => _loadMatrix(silent: true, force: true),
       child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildTableHeader(context),
-            const SizedBox(height: 6),
-            ...courses.map((course) => _buildCourseRow(context, course)),
-          ],
+        physics: const AlwaysScrollableScrollPhysics(),
+        scrollDirection: Axis.vertical,
+        padding: const EdgeInsets.all(12),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildTableHeader(context),
+              const SizedBox(height: 6),
+              ...courses.map((course) => _buildCourseRow(context, course)),
+            ],
+          ),
         ),
       ),
     );

@@ -2,7 +2,9 @@
 /// Data & Logic Flow: Verifies submitPresence posts to /api/v1/presence/confirm,
 /// surfaces backend domain errors as UserFacingException, and refuses fake local writes.
 /// Key Components: PresenceServiceTest
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -78,4 +80,78 @@ void main() {
       );
     },
   );
+
+  test('fetchTodaysMeetings retries once after timeout and recovers on second attempt', () async {
+    HttpOverrides.global = null;
+    var hits = 0;
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() async => server.close(force: true));
+
+    server.listen((req) async {
+      hits++;
+      if (hits == 1) {
+        // Stall attempt 1 past requestTimeout to simulate a dead socket.
+        await Future<void>.delayed(const Duration(seconds: 2));
+        try {
+          await req.response.close();
+        } catch (_) {}
+        return;
+      }
+      final body = jsonEncode([
+        {
+          'id': 57,
+          'meeting_number': 13,
+          'simkuliah_status': 'pending',
+          'schedules': {'course_name': 'KECERDASAN ARTIFISIAL'},
+        },
+      ]);
+      req.response.statusCode = 200;
+      req.response.headers.contentType = ContentType.json;
+      req.response.write(body);
+      await req.response.close();
+    });
+
+    final client = SupabaseClient(
+      'http://127.0.0.1:${server.port}',
+      'dummy-anon',
+    );
+    final service = PresenceService(
+      client: client,
+      requestTimeout: const Duration(milliseconds: 250),
+    );
+
+    final meetings = await service.fetchTodaysMeetings(
+      today: DateTime(2026, 11, 12),
+    );
+    expect(hits, 2);
+    expect(meetings, hasLength(1));
+    expect(meetings.single.courseName, 'KECERDASAN ARTIFISIAL');
+  });
+
+  test('fetchTodaysMeetings throws TimeoutException promptly when all retries hang', () async {
+    HttpOverrides.global = null;
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() async => server.close(force: true));
+
+    server.listen((req) async {
+      await Future<void>.delayed(const Duration(seconds: 5));
+      try {
+        await req.response.close();
+      } catch (_) {}
+    });
+
+    final client = SupabaseClient(
+      'http://127.0.0.1:${server.port}',
+      'dummy-anon',
+    );
+    final service = PresenceService(
+      client: client,
+      requestTimeout: const Duration(milliseconds: 200),
+    );
+
+    await expectLater(
+      service.fetchTodaysMeetings(today: DateTime(2026, 11, 12)),
+      throwsA(isA<TimeoutException>()),
+    );
+  });
 }
