@@ -35,6 +35,17 @@ const String _dataInvalidMessage =
 const String _unexpectedMessage =
     'Terjadi kesalahan yang tidak terduga. Coba lagi.';
 
+/// Exception carrying a clean, user-facing Indonesian message from the backend
+/// or domain validation, surfaced verbatim by [friendlyErrorMessage].
+class UserFacingException implements Exception {
+  final String message;
+
+  const UserFacingException(this.message);
+
+  @override
+  String toString() => message;
+}
+
 /// Returns a short, actionable Indonesian message for [error].
 ///
 /// UI surfaces must show this instead of `error.toString()`, which leaks
@@ -42,6 +53,9 @@ const String _unexpectedMessage =
 /// "ClientException with SocketException: Connection failed (OS Error:
 /// Network is unreachable, errno = 101)..." blob).
 String friendlyErrorMessage(Object error) {
+  if (error is UserFacingException) {
+    return error.message;
+  }
   if (error is TimeoutException) {
     return _timeoutMessage;
   }

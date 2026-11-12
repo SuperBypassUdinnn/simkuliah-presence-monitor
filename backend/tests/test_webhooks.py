@@ -40,18 +40,60 @@ def _client():
     return AsyncClient(transport=transport, base_url="http://test")
 
 
+def _open_card_html(schedule_id: int, course_code: str = "SINF3031", meeting_no: int = 4) -> str:
+    return f"""
+<div class="card">
+  <div class="card-header"><h5>Absensi Kelas C | {course_code} - KECERDASAN ARTIFISIAL | Pertemuan ke-{meeting_no} | SKS Mengajar : 2</h5></div>
+  <div class="card-block">
+    <table><tbody>
+      <tr><td>C</td><td>Gedung MIPA</td><td>E.03.05</td><td>09.50 - 11.30</td><td>10:31</td></tr>
+    </tbody></table>
+    <button id="konfirmasi-kehadiran-{schedule_id}">Konfirmasi Kehadiran</button>
+  </div>
+</div>
+<script>
+$("#konfirmasi-kehadiran-{schedule_id}").on("click", function() {{
+  swal({{}}, function() {{
+    var kelas = 'C';
+    var kd_mt_kul_8 = '{course_code}';
+    var jadwal_mulai = '12-11-2026 09:50:00';
+    var jadwal_berakhir = '12-11-2026 11:30:59';
+    var pertemuan = '{meeting_no}';
+    var sks_mengajar = '2';
+    var id = '{schedule_id}';
+  }});
+}});
+</script>
+"""
+
+
 @pytest.mark.asyncio
 async def test_webhook_action_valid_token_confirm_presence():
     from app.api.v1 import webhooks
 
     webhooks.db_repo = MagicMock()
+    webhooks.db_repo.resolve_meeting_id = AsyncMock(return_value=57)
+    webhooks.db_repo.get_meeting_context = AsyncMock(
+        return_value={
+            "id": 57,
+            "schedule_id": 4,
+            "meeting_number": 4,
+            "schedules": {"id": 4, "course_code": "SINF3031", "class_group": "C"},
+        }
+    )
+    webhooks.db_repo.mark_meeting_present = AsyncMock()
     webhooks.simkuliah_client = MagicMock()
+    webhooks.simkuliah_client.is_authenticated = True
+    webhooks.simkuliah_client.fetch_dashboard = AsyncMock(
+        return_value=_open_card_html(101, "SINF3031", 4)
+    )
     webhooks.simkuliah_client.confirm_presence = AsyncMock(return_value=True)
     webhooks._processed_tokens.clear()
 
     payload = {
         "action": "confirm_presence",
         "schedule_id": 101,
+        "db_schedule_id": 4,
         "meeting_no": 4,
     }
     token = create_action_token(payload, secret=SECRET, expires_in_seconds=300)
@@ -65,6 +107,12 @@ async def test_webhook_action_valid_token_confirm_presence():
 
     assert response.status_code == 200
     assert response.json()["status"] == "success"
+    webhooks.simkuliah_client.confirm_presence.assert_awaited_once()
+    kwargs = webhooks.simkuliah_client.confirm_presence.call_args.kwargs
+    assert kwargs["kelas"] == "C"
+    assert kwargs["kd_mt_kul8"] == "SINF3031"
+    assert kwargs["jadwal_mulai"] == "12-11-2026 09:50:00"
+    webhooks.db_repo.mark_meeting_present.assert_awaited_once_with(57)
 
 
 @pytest.mark.asyncio
@@ -185,7 +233,21 @@ async def test_webhook_action_idempotency_duplicate_returns_success():
         return True
 
     webhooks.db_repo = MagicMock()
+    webhooks.db_repo.resolve_meeting_id = AsyncMock(return_value=12)
+    webhooks.db_repo.get_meeting_context = AsyncMock(
+        return_value={
+            "id": 12,
+            "schedule_id": 1,
+            "meeting_number": 2,
+            "schedules": {"id": 1, "course_code": "SINF3031", "class_group": "C"},
+        }
+    )
+    webhooks.db_repo.mark_meeting_present = AsyncMock()
     webhooks.simkuliah_client = MagicMock()
+    webhooks.simkuliah_client.is_authenticated = True
+    webhooks.simkuliah_client.fetch_dashboard = AsyncMock(
+        return_value=_open_card_html(7, "SINF3031", 2)
+    )
     webhooks.simkuliah_client.confirm_presence = fake_confirm
     webhooks._processed_tokens.clear()
 

@@ -2,18 +2,35 @@
 /// Data & Logic Flow: Streams active lecture meetings, executes presence confirmations and overrides.
 /// Key Components: PresenceService
 import 'dart:async';
+import 'dart:convert';
 
+import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../core/error_message.dart';
 import '../models/meeting_model.dart';
 import '../models/schedule_model.dart';
 
 /// Provides methods and streams for fetching today's meetings, the semester
 /// schedule matrix, and submitting presence overrides.
 class PresenceService {
-  PresenceService({SupabaseClient? client}) : _customClient = client;
+  PresenceService({
+    SupabaseClient? client,
+    http.Client? httpClient,
+    String? apiBaseUrl,
+  }) : _customClient = client,
+       _customHttpClient = httpClient,
+       _customApiBaseUrl = apiBaseUrl;
 
   final SupabaseClient? _customClient;
+  final http.Client? _customHttpClient;
+  final String? _customApiBaseUrl;
+
+  static const String _envApiBaseUrl = String.fromEnvironment(
+    'SIMKULIAH_API_BASE_URL',
+  );
+
+  String get _apiBaseUrl => _customApiBaseUrl ?? _envApiBaseUrl;
 
   SupabaseClient get _client {
     if (_customClient != null) return _customClient;
@@ -94,24 +111,64 @@ class PresenceService {
     await _client.from(_tableOverrides).delete().eq('meeting_id', meetingId);
   }
 
-  /// Submit presence confirmation (hadir) for a meeting.
+  /// Confirm presence on Simkuliah through the backend gateway.
   ///
-  /// Clears any local overrides so 'hadir' maintains absolute authority.
+  /// Never writes 'hadir' directly into Supabase from the client: the backend
+  /// submits the 7-field AJAX confirmation to Simkuliah first and updates
+  /// Supabase only once Simkuliah returns "success".
   Future<void> submitPresence({
     required int meetingId,
     required bool isPresent,
   }) async {
-    await _client
-        .from(_tableMeetings)
-        .update({
-          'simkuliah_status': isPresent ? 'hadir' : 'tidak_hadir',
-          'student_confirmed_at': DateTime.now().toIso8601String(),
-        })
-        .eq('id', meetingId);
+    if (!isPresent) {
+      await _client
+          .from(_tableMeetings)
+          .update({
+            'simkuliah_status': 'tidak_hadir',
+            'student_confirmed_at': DateTime.now().toIso8601String(),
+          })
+          .eq('id', meetingId);
+      return;
+    }
 
-    if (isPresent) {
-      // Overwrite and clear any conflicting local override
-      await _client.from(_tableOverrides).delete().eq('meeting_id', meetingId);
+    if (_apiBaseUrl.isEmpty) {
+      throw const UserFacingException(
+        'Server pemantau belum dikonfigurasi. Lakukan presensi langsung melalui website Simkuliah.',
+      );
+    }
+
+    final ownsClient = _customHttpClient == null;
+    final httpClient = _customHttpClient ?? http.Client();
+    try {
+      final response = await httpClient
+          .post(
+            Uri.parse('$_apiBaseUrl/api/v1/presence/confirm'),
+            headers: const {'Content-Type': 'application/json'},
+            body: jsonEncode({'meeting_id': meetingId}),
+          )
+          .timeout(const Duration(seconds: 30));
+
+      if (response.statusCode == 200) {
+        return;
+      }
+
+      String? serverDetail;
+      try {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic> && decoded['detail'] is String) {
+          serverDetail = decoded['detail'] as String;
+        }
+      } catch (_) {
+        // Non-JSON body falls back to generic status error below.
+      }
+      throw UserFacingException(
+        serverDetail ??
+            'Konfirmasi presensi ke Simkuliah gagal (HTTP ${response.statusCode}).',
+      );
+    } finally {
+      if (ownsClient) {
+        httpClient.close();
+      }
     }
   }
 }

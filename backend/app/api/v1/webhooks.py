@@ -16,8 +16,13 @@ from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
 from app.config import settings
+from app.core import runtime
 from app.core.database import DatabaseRepository
 from app.core.security import verify_action_token
+from app.services.presence_confirmer import (
+    PresenceConfirmError,
+    confirm_meeting_on_simkuliah,
+)
 from app.services.simkuliah_client import SimkuliahClient
 
 router = APIRouter(prefix="/webhook")
@@ -49,11 +54,15 @@ def _get_db() -> DatabaseRepository:
 
 def _get_client() -> SimkuliahClient:
     global simkuliah_client
-    if simkuliah_client is None:
-        simkuliah_client = SimkuliahClient(
-            npm=settings.SIMKULIAH_NPM,
-            password=settings.SIMKULIAH_PASSWORD,
-        )
+    if simkuliah_client is not None:
+        return simkuliah_client
+    poller = runtime.get_poller()
+    if poller is not None and hasattr(poller, "client"):
+        return poller.client
+    simkuliah_client = SimkuliahClient(
+        npm=settings.SIMKULIAH_NPM,
+        password=settings.SIMKULIAH_PASSWORD,
+    )
     return simkuliah_client
 
 
@@ -106,16 +115,27 @@ async def webhook_action(
 
     if action == "confirm_presence":
         schedule_id = (body.schedule_id if body else None) or payload.get("schedule_id")
+        db_schedule_id = payload.get("db_schedule_id")
         meeting_no = (body.meeting_no if body else None) or payload.get("meeting_no")
-        if schedule_id is None or meeting_no is None:
+        meeting_id = (body.meeting_id if body else None) or payload.get("meeting_id")
+        if (schedule_id is None and db_schedule_id is None and meeting_id is None) or (
+            meeting_no is None and meeting_id is None
+        ):
             raise HTTPException(
                 status_code=400,
                 detail="confirm_presence requires schedule_id and meeting_no",
             )
-        client = _get_client()
-        ok = await client.confirm_presence(schedule_id, meeting_no)
-        if not ok:
-            raise HTTPException(status_code=502, detail="Presence confirmation failed")
+        try:
+            await confirm_meeting_on_simkuliah(
+                client=_get_client(),
+                repo=_get_db(),
+                meeting_id=meeting_id,
+                schedule_id=schedule_id,
+                db_schedule_id=db_schedule_id,
+                meeting_no=meeting_no,
+            )
+        except PresenceConfirmError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
     elif action in ("mark_override", "set_override"):
         override_type = (body.override_type if body else None) or payload.get("override_type")

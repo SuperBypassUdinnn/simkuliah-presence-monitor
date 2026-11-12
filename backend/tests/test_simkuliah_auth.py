@@ -125,11 +125,44 @@ async def test_confirm_presence_success():
     client = SimkuliahClient(npm="2408107010053", password="test_password")
     mock_response = AsyncMock()
     mock_response.status_code = 200
+    mock_response.text = "success"
     mock_response.raise_for_status = MagicMock()
     client._client.post = AsyncMock(return_value=mock_response)
 
-    status = await client.confirm_presence(schedule_id=101, meeting_no=4)
+    status = await client.confirm_presence(
+        schedule_id=101,
+        meeting_no=4,
+        kelas="C",
+        kd_mt_kul8="SINF3031",
+        jadwal_mulai="12-11-2026 09:50:00",
+        jadwal_berakhir="12-11-2026 11:30:59",
+        sks_mengajar="2",
+        presence_id="101",
+    )
     assert status is True
+    call_kwargs = client._client.post.call_args.kwargs
+    assert call_kwargs["data"]["kelas"] == "C"
+    assert call_kwargs["data"]["kd_mt_kul8"] == "SINF3031"
+    assert call_kwargs["data"]["id"] == "101"
+    assert call_kwargs["headers"]["X-Requested-With"] == "XMLHttpRequest"
+
+
+@pytest.mark.asyncio
+async def test_confirm_presence_rejects_html_login_or_failure_on_200():
+    client = SimkuliahClient(npm="2408107010053", password="test_password")
+    mock_response = AsyncMock()
+    mock_response.status_code = 200
+    mock_response.text = "<html><body>Login</body></html>"
+    mock_response.raise_for_status = MagicMock()
+    client._client.post = AsyncMock(return_value=mock_response)
+
+    assert await client.confirm_presence(schedule_id=101, meeting_no=4) is False
+
+    mock_response.text = "gagal"
+    assert await client.confirm_presence(schedule_id=101, meeting_no=4) is False
+
+    mock_response.text = "unsuccessful"
+    assert await client.confirm_presence(schedule_id=101, meeting_no=4) is False
 
 
 @pytest.mark.asyncio
