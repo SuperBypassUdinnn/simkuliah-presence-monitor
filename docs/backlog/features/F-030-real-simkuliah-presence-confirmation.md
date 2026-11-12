@@ -50,7 +50,7 @@ Two owner-reported issues from 2026-11-12:
       `POST /api/v1/presence/confirm`, throws `UserFacingException` with the
       server `detail` message on `409`/`502` failures, and never writes
       `'hadir'` directly to Supabase.
-- [ ] **Bump client version to `1.0.5+4`** (deferred to release PR alongside APK/Linux bundle rebuilds).
+- [x] **Bump client version to `1.0.5+4`** alongside Android APK and Linux bundle release builds.
 
 ## 3. Verification
 
