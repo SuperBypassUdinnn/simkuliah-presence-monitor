@@ -74,10 +74,16 @@ def priority_for_state(state: NotificationLevel) -> Priority:
     return Priority.NORMAL
 
 
-def _rank(level: NotificationLevel | None) -> int:
+def rank_for_level(level: NotificationLevel | None) -> int:
+    """Public ordinal rank accessor (used by restart-safe dedupe persistence)."""
     if level is None:
         return -1
     return _LEVEL_RANK[level]
+
+
+def _rank(level: NotificationLevel | None) -> int:
+    """Backwards-compatible private alias for :func:`rank_for_level`."""
+    return rank_for_level(level)
 
 
 def _combine(date, t: time) -> datetime:

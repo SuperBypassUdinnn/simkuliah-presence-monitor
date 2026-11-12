@@ -28,6 +28,7 @@ from app.services.simkuliah_parser import (
 from app.services.state_machine import (
     NotificationLevel,
     evaluate_notification_state,
+    rank_for_level,
 )
 
 logger = logging.getLogger(__name__)
@@ -153,6 +154,10 @@ class AdaptivePoller:
         self.last_tick: dict[str, Any] = {}
         # Last notified notification level per schedule_id / course_code (monotonic guard).
         self._last_levels: dict[int | str, NotificationLevel | None] = {}
+        # Highest dispatched state rank per Supabase meeting id, loaded from
+        # notification_logs at tick start so restarted pollers do not re-fire
+        # notifications a previous instance already sent.
+        self._notified_ranks: dict[int, int] = {}
         self._tick_lock = asyncio.Lock()
 
     # ------------------------------------------------------------------ #
@@ -330,6 +335,7 @@ class AdaptivePoller:
         # and the state machine all speak WIB, while a UTC container would
         # otherwise shift every comparison by seven hours.
         now = naive_wib_now()
+        await self._load_notified_ranks(now)
         interval = calculate_next_poll_interval(
             now, active_lectures, min_idle_interval_seconds=self._idle_interval()
         )
@@ -425,6 +431,17 @@ class AdaptivePoller:
 
             meeting_key: int | str = schedule_id if schedule_id is not None else item.course_code
             last_level = self._last_levels.get(meeting_key)
+            if last_level is None and meeting_id is not None:
+                # Fall back to the persistent notification log so a freshly
+                # restarted backend (Render redeploy / free-tier restart) does
+                # not re-dispatch states a previous instance already sent.
+                last_rank = self._notified_ranks.get(meeting_id)
+                if last_rank is not None:
+                    for level in NotificationLevel:
+                        if rank_for_level(level) == last_rank:
+                            last_level = level
+                            self._last_levels[meeting_key] = level
+                            break
 
             state = evaluate_notification_state(
                 now=now,
@@ -439,9 +456,9 @@ class AdaptivePoller:
             if state is None:
                 continue
 
-            # Monotonic guard: never re-dispatch a level equal to the last
-            # notified level for this meeting.
-            if last_level is not None and state == last_level:
+            # Monotonic guard: never re-dispatch a level equal to (or below)
+            # the last notified level for this meeting.
+            if last_level is not None and rank_for_level(last_level) >= rank_for_level(state):
                 continue
 
             context: dict[str, Any] = {
@@ -463,11 +480,29 @@ class AdaptivePoller:
             self.dispatcher.dispatch(state, context)
 
             self._last_levels[meeting_key] = state
+            if meeting_id is not None:
+                # Persist the dispatched rank so restarted backend instances
+                # do not re-fire this notification.
+                try:
+                    await self.repo.log_notification(meeting_id, rank_for_level(state))
+                    self._notified_ranks[meeting_id] = rank_for_level(state)
+                except Exception as exc:  # noqa: BLE001 - non-fatal
+                    logger.warning("notification log write failed: %s", exc)
 
         # Refresh completion timestamp after every meeting's live status has
         # been persisted so on-demand sync callers only unblock once Supabase
         # reflects the latest dashboard state.
         self.last_success_at = datetime.now()
+
+    async def _load_notified_ranks(self, now: datetime) -> None:
+        """Refresh the restart-safe notification dedupe map from the database."""
+        if not hasattr(self.repo, "list_today_meeting_ids"):
+            return
+        try:
+            ids = await self.repo.list_today_meeting_ids(now)
+            self._notified_ranks = await self.repo.load_notified_levels(ids)
+        except Exception as exc:  # noqa: BLE001 - non-fatal
+            logger.warning("notification rank load failed: %s", exc)
 
     # ------------------------------------------------------------------ #
     # Internal helpers
