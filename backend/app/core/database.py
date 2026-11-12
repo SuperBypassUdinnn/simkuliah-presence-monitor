@@ -337,6 +337,78 @@ class DatabaseRepository:
         await self._with_retry(operation, "mark_meeting_present")
 
     # ------------------------------------------------------------------ #
+    # Notification logs (persistent dispatch dedupe)
+    # ------------------------------------------------------------------ #
+
+    async def load_notified_levels(self, meeting_ids: list[int]) -> dict[int, int]:
+        """Return the highest dispatched ``state_level`` per meeting id.
+
+        Reconstructs the notification state machine's monotonic guard across
+        backend restarts (Render redeploys), preventing duplicate pushes for
+        meetings whose level was already dispatched by a previous instance.
+        """
+
+        def operation() -> Any:
+            if not meeting_ids:
+                return []
+            response = (
+                self.client.table("notification_logs")
+                .select("meeting_id,state_level")
+                .in_("meeting_id", meeting_ids)
+                .order("state_level", desc=True)
+                .execute()
+            )
+            return response.data or []
+
+        rows = await self._with_retry(operation, "load_notified_levels")
+        best: dict[int, int] = {}
+        for row in rows:
+            meeting_id = row.get("meeting_id")
+            level = row.get("state_level")
+            if meeting_id is None or level is None:
+                continue
+            best[int(meeting_id)] = max(best.get(int(meeting_id), 0), int(level))
+        return best
+
+    async def log_notification(
+        self, meeting_id: int, state_level: int, *, now: datetime | None = None
+    ) -> None:
+        """Record a dispatched notification for restart-safe dedupe."""
+
+        def operation() -> None:
+            moment = as_wib(now) if now is not None else now_wib()
+            self.client.table("notification_logs").insert(
+                {
+                    "meeting_id": meeting_id,
+                    "state_level": state_level,
+                    "dispatched_at": moment.isoformat(),
+                }
+            ).execute()
+
+        await self._with_retry(operation, "log_notification")
+
+    async def list_today_meeting_ids(self, now: datetime | None = None) -> list[int]:
+        """Return Supabase meeting ids for today's rows.
+
+        Used to preload restart-safe notification dedupe state. Meetings whose
+        id could not be resolved (no dashboard card + no matrix row) stay
+        reliant on the in-memory guard only.
+        """
+        moment = as_wib(now) if now is not None else now_wib()
+        date_str = moment.date().isoformat()
+
+        def operation() -> Any:
+            response = (
+                self.client.table(_TABLE_MEETINGS)
+                .select("id")
+                .eq("meeting_date", date_str)
+                .execute()
+            )
+            return [row["id"] for row in (response.data or []) if row.get("id") is not None]
+
+        return await self._with_retry(operation, "list_today_meeting_ids")
+
+    # ------------------------------------------------------------------ #
     # Incidents
     # ------------------------------------------------------------------ #
     async def log_incident(self, incident_type: str, status_code: int, snippet: str) -> None:

@@ -20,6 +20,8 @@ from app.services.poller import (
     AdaptivePoller,
     calculate_next_poll_interval,
 )
+from app.services.simkuliah_parser import ParsedScheduleItem
+from app.services.state_machine import NotificationLevel
 
 # --------------------------------------------------------------------------- #
 # Helpers
@@ -649,6 +651,117 @@ async def test_trigger_if_stale_runs_only_when_stale(poller_deps):
         did_sync_stale = await poller.trigger_if_stale(max_age_seconds=30)
         assert did_sync_stale is True
         assert deps["client"].fetch_today_schedule.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_poller_reuses_persistent_notification_log_after_restart(poller_deps):
+    """A restarted poller must not re-fire a level already dispatched by a
+    previous instance: notification_logs (state_level 4 = WINDOW_EXPIRED)
+    seeds the monotonic guard."""
+    deps = poller_deps
+    deps["repo"].list_today_meeting_ids = AsyncMock(return_value=[183])
+    deps["repo"].load_notified_levels = AsyncMock(return_value={183: 4})
+    deps["repo"].resolve_schedule_id = AsyncMock(return_value=13)
+    deps["repo"].resolve_meeting_id = AsyncMock(return_value=183)
+    deps["repo"].get_active_override = AsyncMock(return_value=None)
+
+    items = [
+        ParsedScheduleItem(
+            course_code="SINF6075",
+            course_name="PRAKTIKUM PROTOKOL JARINGAN MAJU",
+            room="Lab. Geospasial",
+            start_time="16:35",
+            end_time="18:15",
+            lecturer="Arie Budiansyah, S.T., M.Eng.",
+            class_group="A",
+        )
+    ]
+
+    # Card present on the dashboard so meeting_no and meeting_id resolve.
+    card_html = (
+        '<div class="card"><div class="card-header"><h5>Absensi Kelas A '
+        "| SINF6075 - PRAKTIKUM PROTOKOL JARINGAN MAJU | Pertemuan ke-11 "
+        '</h5></div><div class="card-block"><table><tbody><tr><td>A</td>'
+        "<td>Gedung MIPA</td><td>Lab. Geospasial</td><td>16.35 - 18.15</td>"
+        "<td>17:45</td></tr></tbody></table></div></div>"
+    )
+    deps["client"].fetch_dashboard = AsyncMock(return_value=card_html)
+
+    poller = AdaptivePoller(
+        client=deps["client"],
+        repo=deps["repo"],
+        dispatcher=deps["dispatcher"],
+        scheduler=deps["scheduler"],
+    )
+
+    with (
+        patch("app.services.poller.parse_daily_schedule", return_value=items),
+        patch(
+            "app.services.poller.calculate_next_poll_interval",
+            return_value=60,
+        ),
+    ):
+        await poller._tick()
+
+    deps["dispatcher"].dispatch.assert_not_called()
+    deps["repo"].log_notification.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_poller_logs_new_state_to_notification_log(poller_deps):
+    deps = poller_deps
+    deps["repo"].list_today_meeting_ids = AsyncMock(return_value=[183])
+    deps["repo"].load_notified_levels = AsyncMock(return_value={})
+    deps["repo"].resolve_schedule_id = AsyncMock(return_value=13)
+    deps["repo"].resolve_meeting_id = AsyncMock(return_value=183)
+    deps["repo"].get_active_override = AsyncMock(return_value=None)
+    deps["repo"].log_notification = AsyncMock()
+
+    items = [
+        ParsedScheduleItem(
+            course_code="SINF6075",
+            course_name="PRAKTIKUM PROTOKOL JARINGAN MAJU",
+            room="Lab. Geospasial",
+            start_time="16:35",
+            end_time="18:15",
+            lecturer="Arie Budiansyah, S.T., M.Eng.",
+            class_group="A",
+        )
+    ]
+
+    # Card present on the dashboard so meeting_no and meeting_id resolve.
+    card_html = (
+        '<div class="card"><div class="card-header"><h5>Absensi Kelas A '
+        "| SINF6075 - PRAKTIKUM PROTOKOL JARINGAN MAJU | Pertemuan ke-11 "
+        '</h5></div><div class="card-block"><table><tbody><tr><td>A</td>'
+        "<td>Gedung MIPA</td><td>Lab. Geospasial</td><td>16.35 - 18.15</td>"
+        "<td>17:45</td></tr></tbody></table></div></div>"
+    )
+    deps["client"].fetch_dashboard = AsyncMock(return_value=card_html)
+
+    poller = AdaptivePoller(
+        client=deps["client"],
+        repo=deps["repo"],
+        dispatcher=deps["dispatcher"],
+        scheduler=deps["scheduler"],
+    )
+
+    with (
+        patch("app.services.poller.parse_daily_schedule", return_value=items),
+        patch(
+            "app.services.poller.calculate_next_poll_interval",
+            return_value=60,
+        ),
+        patch(
+            "app.services.poller.evaluate_notification_state",
+            return_value=NotificationLevel.WINDOW_EXPIRED,
+        ),
+    ):
+        await poller._tick()
+
+    deps["dispatcher"].dispatch.assert_called_once()
+    deps["repo"].log_notification.assert_called_once_with(183, 4)
+    assert poller._notified_ranks == {183: 4}
 
 
 @pytest.mark.asyncio
