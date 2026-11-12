@@ -10,7 +10,9 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/app_notification.dart';
+import '../core/refresh_bus.dart';
 import '../models/meeting_model.dart';
+import 'presence_service.dart';
 
 /// Alert kinds surfaced in-app. Mirrors the backend state machine levels that
 /// are meaningful on desktop; only the urgent two are high priority.
@@ -218,9 +220,14 @@ class RealtimeAlertEvaluator {
 /// the same states, so the app only starts this service on non-Android
 /// platforms.
 class RealtimeAlertService {
-  RealtimeAlertService({SupabaseClient? client}) : _customClient = client;
+  RealtimeAlertService({
+    SupabaseClient? client,
+    PresenceService? presenceService,
+  }) : _customClient = client,
+       _customPresenceService = presenceService;
 
   final SupabaseClient? _customClient;
+  final PresenceService? _customPresenceService;
   StreamSubscription<List<Map<String, dynamic>>>? _subscription;
   Timer? _timer;
 
@@ -267,11 +274,13 @@ class RealtimeAlertService {
         .stream(primaryKey: ['id'])
         .eq('meeting_date', dateStr)
         .listen(
-          (rows) => _handleRows(
-            rows,
-            onAlert: onAlert,
-            onDismissAlert: onDismissAlert,
-            clock: clock,
+          (rows) => unawaited(
+            _handleRows(
+              rows,
+              onAlert: onAlert,
+              onDismissAlert: onDismissAlert,
+              clock: clock,
+            ),
           ),
           onError: (Object error) =>
               debugPrint('Realtime alert stream error: $error'),
@@ -313,20 +322,35 @@ class RealtimeAlertService {
     );
   }
 
-  void _handleRows(
+  Future<void> _handleRows(
     List<Map<String, dynamic>> rows, {
     required int Function(PresenceAlert alert) onAlert,
     void Function(int meetingId, PresenceAlertKind kind)? onDismissAlert,
     DateTime Function()? clock,
-  }) {
-    final meetings = rows.map(MeetingModel.fromJson).toList()
-      ..sort((a, b) => a.id.compareTo(b.id));
+  }) async {
+    List<MeetingModel> meetings;
+    try {
+      final now = clock?.call() ?? DateTime.now();
+      final service =
+          _customPresenceService ?? PresenceService(client: _client);
+      meetings = await service.fetchTodaysMeetings(today: now);
+    } catch (_) {
+      // Fall back to the raw stream payload if the join query fails offline.
+      meetings = rows.map(MeetingModel.fromJson).toList()
+        ..sort((a, b) => a.id.compareTo(b.id));
+    }
+    if (_subscription == null) {
+      return;
+    }
     _evaluate(
       meetings,
       onAlert: onAlert,
       onDismissAlert: onDismissAlert,
       clock: clock,
     );
+    // Notify mounted feed views to reload from Supabase so newly opened
+    // presence windows or status transitions appear immediately on screen.
+    RefreshBus.instance.requestRefresh();
   }
 
   void _evaluate(

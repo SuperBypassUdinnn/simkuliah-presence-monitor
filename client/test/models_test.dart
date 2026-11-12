@@ -126,4 +126,17 @@ void main() {
     );
     expect(odd.startTimeShort, '7:30');
   });
+
+  test('MeetingModel converts UTC deadline_at strings to local DateTime', () {
+    final meeting = MeetingModel.fromJson({
+      'id': 40,
+      'meeting_number': 13,
+      'simkuliah_status': 'pending',
+      'deadline_at': '2026-11-12T03:31:00+00:00',
+    });
+
+    expect(meeting.deadlineAt, isNotNull);
+    expect(meeting.deadlineAt!.isUtc, isFalse);
+    expect(meeting.deadlineAt!.toUtc(), DateTime.utc(2026, 11, 12, 3, 31));
+  });
 }

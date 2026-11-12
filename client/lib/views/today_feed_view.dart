@@ -34,6 +34,7 @@ class _TodayFeedViewState extends State<TodayFeedView> {
   late final PresenceService _service;
   late final BackendHealthService _healthService;
   StreamSubscription<void>? _refreshSub;
+  Timer? _keepAliveTimer;
   List<MeetingModel>? _meetings;
   bool _loading = true;
   Object? _error;
@@ -52,21 +53,32 @@ class _TodayFeedViewState extends State<TodayFeedView> {
       unawaited(_load(silent: true));
       unawaited(_checkHealth());
     });
+    if (_healthService.isConfigured) {
+      // Keep the free-tier Render container warm (15-min idle sleep) while
+      // the desktop tray or app is running, without forcing upstream scrapes.
+      _keepAliveTimer = Timer.periodic(
+        const Duration(minutes: 5),
+        (_) => unawaited(_healthService.keepAlive()),
+      );
+    }
   }
 
   @override
   void dispose() {
+    _keepAliveTimer?.cancel();
     unawaited(_refreshSub?.cancel());
     super.dispose();
   }
 
-  /// Probe backend and Simkuliah health for the warning banner. Refresh-bus
-  /// events can fire in bursts, so rechecks are throttled to one per minute;
-  /// a probe never throws and failures just light the banner.
+  /// Probe backend and Simkuliah health for the warning banner and wake a
+  /// stale poller on demand. Refresh-bus events can fire in bursts, so
+  /// rechecks are throttled to once per 30 seconds; when the backend runs a
+  /// fresh sync (`syncedNow`), broadcast a refresh so every mounted view reads
+  /// the newly written state.
   Future<void> _checkHealth() async {
     final last = _lastHealthCheckAt;
     if (last != null &&
-        DateTime.now().difference(last) < const Duration(minutes: 1)) {
+        DateTime.now().difference(last) < const Duration(seconds: 30)) {
       return;
     }
     _lastHealthCheckAt = DateTime.now();
@@ -75,6 +87,9 @@ class _TodayFeedViewState extends State<TodayFeedView> {
     setState(() {
       _health = result;
     });
+    if (result.syncedNow) {
+      RefreshBus.instance.requestRefresh();
+    }
   }
 
   /// Fetch today's meetings. [silent] keeps any cached data on screen and

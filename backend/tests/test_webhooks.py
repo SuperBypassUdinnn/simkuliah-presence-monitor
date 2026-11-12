@@ -279,3 +279,31 @@ async def test_health_reports_ok_after_successful_sync():
 
     assert response.status_code == 200
     assert response.json()["simkuliah_status"] == "ok"
+    assert response.json()["synced_now"] is False
+
+
+@pytest.mark.asyncio
+async def test_health_sync_flag_wakes_stale_poller():
+    from app.core import runtime
+    from app.services.poller import AdaptivePoller
+
+    original = runtime.get_poller()
+    poller = AdaptivePoller(
+        client=MagicMock(),
+        repo=MagicMock(),
+        dispatcher=MagicMock(),
+        scheduler=MagicMock(),
+    )
+    poller.trigger_if_stale = AsyncMock(return_value=True)
+    runtime.set_poller(poller)
+    try:
+        async with _client() as ac:
+            plain = await ac.get("/api/v1/health")
+            poller.trigger_if_stale.assert_not_awaited()
+            assert plain.json()["synced_now"] is False
+
+            woken = await ac.get("/api/v1/health?sync=true")
+            poller.trigger_if_stale.assert_awaited_once_with(max_age_seconds=30)
+            assert woken.json()["synced_now"] is True
+    finally:
+        runtime.set_poller(original)

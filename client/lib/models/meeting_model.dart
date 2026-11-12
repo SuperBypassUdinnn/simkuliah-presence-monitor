@@ -74,7 +74,7 @@ class MeetingModel {
     final status = (json['simkuliah_status'] as String? ?? 'Pending');
     final deadlineStr = json['deadline_at'] as String?;
     final deadline = deadlineStr != null
-        ? DateTime.tryParse(deadlineStr)
+        ? DateTime.tryParse(deadlineStr)?.toLocal()
         : null;
 
     final isPresenceOpen =

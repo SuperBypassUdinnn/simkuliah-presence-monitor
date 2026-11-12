@@ -33,25 +33,33 @@ def _simkuliah_status() -> str:
 
 
 @router.get("/health")
-async def health() -> dict[str, object]:
-    """Return the backend health status.
+async def health(sync: bool = False) -> dict[str, object]:
+    """Return the backend health status, waking a stale poller on demand.
+
+    Pass ``?sync=true`` from interactive clients when opening or refreshing
+    the app so a sleeping or newly woken Render container runs a fresh
+    Simkuliah sync before the client reads Supabase. Plain ``/health`` stays
+    instant for Render's liveness probe.
 
     Returns:
         ``{"status": "ok", "service": "simkuliah-presence-monitor",
-        "simkuliah_status": "ok" | "degraded" | "pending" | "unknown"}``.
-        ``simkuliah_status`` mirrors the poller's last sync so clients can
-        warn about stale presence data while the backend itself is healthy.
-        ``last_tick`` carries the most recent tick's per-stage telemetry
-        (page title, html size, parsed counts, per-stage errors) so a
-        "successful fetch that persists nothing" is diagnosable without
-        backend log access.
+        "simkuliah_status": "ok" | "degraded" | "pending" | "unknown",
+        "synced_now": bool}``.
     """
+    poller = runtime.get_poller()
+    synced_now = False
+    if sync and isinstance(poller, AdaptivePoller):
+        try:
+            synced_now = await poller.trigger_if_stale(max_age_seconds=30)
+        except Exception:  # noqa: BLE001 - health probe must never 500
+            synced_now = False
+
     payload: dict[str, object] = {
         "status": "ok",
         "service": SERVICE_NAME,
         "simkuliah_status": _simkuliah_status(),
+        "synced_now": synced_now,
     }
-    poller = runtime.get_poller()
     if isinstance(poller, AdaptivePoller):
         payload["last_tick"] = dict(poller.last_tick)
     return payload

@@ -129,4 +129,29 @@ void main() {
 
     expect(result.status, BackendHealthStatus.backendDown);
   });
+
+  test(
+    'check passes sync=true and parses synced_now; keepAlive omits sync',
+    () async {
+      final seenUris = <Uri>[];
+      final service = BackendHealthService(
+        client: MockClient((request) async {
+          seenUris.add(request.url);
+          return http.Response(
+            '{"status":"ok","simkuliah_status":"ok","synced_now":true}',
+            200,
+          );
+        }),
+        baseUrl: 'https://backend.example',
+      );
+
+      final checkResult = await service.check();
+      expect(checkResult.syncedNow, isTrue);
+      expect(seenUris.last.path, '/api/v1/health');
+      expect(seenUris.last.queryParameters['sync'], 'true');
+
+      await service.keepAlive();
+      expect(seenUris.last.queryParameters, isEmpty);
+    },
+  );
 }

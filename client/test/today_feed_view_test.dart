@@ -139,4 +139,62 @@ void main() {
     expect(find.textContaining('errno = 101'), findsNothing);
     expect(find.text('Coba Lagi'), findsOneWidget);
   });
+
+  testWidgets('syncedNow triggers a refresh without re-probing health', (
+    tester,
+  ) async {
+    var fetchCount = 0;
+    final countingPresence = _CountingPresenceService(() => ++fetchCount);
+    final health = _CountingHealthService(
+      const BackendHealthResult(
+        status: BackendHealthStatus.ok,
+        message: '',
+        syncedNow: true,
+      ),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: TodayFeedView(
+            presenceService: countingPresence,
+            backendHealthService: health,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Initial load (1) + post-sync refresh (2), while health check ran once.
+    expect(fetchCount, 2);
+    expect(health.checkCount, 1);
+  });
+}
+
+class _CountingPresenceService extends PresenceService {
+  _CountingPresenceService(this.onFetch);
+
+  final void Function() onFetch;
+
+  @override
+  Future<List<MeetingModel>> fetchTodaysMeetings({
+    required DateTime today,
+  }) async {
+    onFetch();
+    return [_meeting(1, 'KECERDASAN ARTIFISIAL')];
+  }
+}
+
+class _CountingHealthService extends BackendHealthService {
+  _CountingHealthService(this.result);
+
+  final BackendHealthResult result;
+  int checkCount = 0;
+
+  @override
+  Future<BackendHealthResult> check() async {
+    checkCount++;
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    return result;
+  }
 }
