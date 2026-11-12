@@ -72,8 +72,10 @@ def calculate_next_poll_interval(
 
     Returns:
         60 when within an active lecture, 120 when within pre-class
-        observation (10 minutes before a lecture starts), otherwise the idle
-        interval.
+        observation (10 minutes before a lecture starts), or the time until
+        the next pre-class observation window (capped at
+        ``min_idle_interval_seconds``) so an idle tick never oversleeps past
+        an upcoming lecture's start and attendance window.
     """
     now_time = now.time()
 
@@ -82,11 +84,18 @@ def calculate_next_poll_interval(
         if start_time <= now_time <= end_time:
             return 60
 
+    upcoming_waits: list[int] = []
     for start_time, _end_time in active_lectures:
         # Pre-class observation window: [start - 10m, start).
-        pre_class_start = (datetime.combine(now.date(), start_time) - timedelta(minutes=10)).time()
+        pre_class_dt = datetime.combine(now.date(), start_time) - timedelta(minutes=10)
+        pre_class_start = pre_class_dt.time()
         if pre_class_start <= now_time < start_time:
             return 120
+        if now < pre_class_dt:
+            upcoming_waits.append(max(60, int((pre_class_dt - now).total_seconds())))
+
+    if upcoming_waits:
+        return min(min_idle_interval_seconds, min(upcoming_waits))
 
     return min_idle_interval_seconds
 
@@ -144,6 +153,7 @@ class AdaptivePoller:
         self.last_tick: dict[str, Any] = {}
         # Last notified notification level per schedule_id / course_code (monotonic guard).
         self._last_levels: dict[int | str, NotificationLevel | None] = {}
+        self._tick_lock = asyncio.Lock()
 
     # ------------------------------------------------------------------ #
     # Helpers
@@ -167,7 +177,7 @@ class AdaptivePoller:
                 current_interval = job.trigger.interval  # type: ignore[attr-defined]
             except AttributeError:
                 current_interval = None
-            if current_interval == interval_seconds:
+            if current_interval in (interval_seconds, timedelta(seconds=interval_seconds)):
                 return
         self.scheduler.reschedule_job(
             "adaptive_poller_tick",
@@ -201,12 +211,38 @@ class AdaptivePoller:
         """Shut down the scheduler."""
         self.scheduler.shutdown()
 
+    async def trigger_if_stale(self, max_age_seconds: int = 30) -> bool:
+        """Run an immediate poll cycle when the last successful sync is older
+        than ``max_age_seconds`` (or has never completed).
+
+        Used by ``GET /api/v1/health?sync=true`` so opening or refreshing the
+        client wakes a sleeping poller immediately instead of waiting for an
+        idle timer. Returns ``True`` when a fresh sync completed during this
+        call (either executed here or awaited while an in-flight tick wrapped
+        up).
+        """
+        before = self.last_success_at
+        if before is not None and (datetime.now() - before).total_seconds() < max_age_seconds:
+            return False
+        async with self._tick_lock:
+            current = self.last_success_at
+            if current is not None and (datetime.now() - current).total_seconds() < max_age_seconds:
+                # Another tick finished while we waited on the lock.
+                return current != before
+            await self._run_tick()
+        return self.last_success_at != before
+
     # ------------------------------------------------------------------ #
     # Polling tick
     # ------------------------------------------------------------------ #
 
     async def _tick(self) -> None:
-        """Run a single polling cycle."""
+        """Run a single polling cycle serialized by ``_tick_lock``."""
+        async with self._tick_lock:
+            await self._run_tick()
+
+    async def _run_tick(self) -> None:
+        """Execute one full polling cycle."""
         if not await self._ensure_session():
             # No session and login failed: back off and retry next tick.
             self.consecutive_failures += 1
@@ -250,7 +286,6 @@ class AdaptivePoller:
 
         # Successful fetch: reset backoff state.
         self.consecutive_failures = 0
-        self.last_success_at = datetime.now()
         self.last_tick = {
             "at": datetime.now().isoformat(timespec="seconds"),
             "html_bytes": len(html),
@@ -271,7 +306,6 @@ class AdaptivePoller:
             items: list[ParsedScheduleItem] = parse_daily_schedule(html)
             self.last_tick["items"] = len(items)
             await self.repo.upsert_schedules(items)
-            await self._sync_meetings_from_today(html)
         except Exception as exc:  # noqa: BLE001 - recorded, not raised
             logger.exception("schedule parse/persist failed")
             self.last_tick["error"] = f"parse/persist: {exc}"
@@ -429,6 +463,11 @@ class AdaptivePoller:
             self.dispatcher.dispatch(state, context)
 
             self._last_levels[meeting_key] = state
+
+        # Refresh completion timestamp after every meeting's live status has
+        # been persisted so on-demand sync callers only unblock once Supabase
+        # reflects the latest dashboard state.
+        self.last_success_at = datetime.now()
 
     # ------------------------------------------------------------------ #
     # Internal helpers

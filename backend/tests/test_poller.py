@@ -68,8 +68,31 @@ def test_interval_at_pre_class_boundary_is_pre_class():
     assert interval == 120
 
 
-def test_interval_just_outside_pre_class_is_idle():
+def test_interval_before_pre_class_clamps_to_pre_class_entry():
+    """An idle tick before an upcoming lecture must wake at start_time - 10m
+    instead of sleeping for the full 2-hour idle interval past the lecture."""
+    # 07:49 is 60s before the 07:50 pre-class window of an 08:00 lecture.
     now = _dt(7, 49)
+    interval = calculate_next_poll_interval(now, active_lectures=[(time(8, 0), time(9, 40))])
+    assert interval == 60
+
+    # Production repro (2026-11-12): tick at 08:43 before a 09:50 lecture
+    # (pre-class 09:40 = 57 minutes = 3420s away).
+    now_morning = _dt(8, 43)
+    interval_morning = calculate_next_poll_interval(
+        now_morning, active_lectures=[(time(9, 50), time(11, 30))]
+    )
+    assert interval_morning == 3420
+
+
+def test_interval_far_before_pre_class_uses_idle_cap():
+    now = _dt(5, 0)
+    interval = calculate_next_poll_interval(now, active_lectures=[(time(8, 0), time(9, 40))])
+    assert interval >= 3600
+
+
+def test_interval_after_lecture_ends_is_idle():
+    now = _dt(9, 41)
     interval = calculate_next_poll_interval(now, active_lectures=[(time(8, 0), time(9, 40))])
     assert interval >= 3600
 
@@ -595,3 +618,56 @@ async def test_poller_tick_tracks_last_level_prevents_duplicate_notifications(
         # Second tick with same state is suppressed
         await poller._tick()
         assert deps["dispatcher"].dispatch.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_trigger_if_stale_runs_only_when_stale(poller_deps):
+    from datetime import timedelta
+
+    deps = poller_deps
+    poller = AdaptivePoller(
+        client=deps["client"],
+        repo=deps["repo"],
+        dispatcher=deps["dispatcher"],
+        scheduler=deps["scheduler"],
+    )
+
+    with patch("app.services.poller.parse_daily_schedule", return_value=[]):
+        # Never synced yet -> runs immediately and marks last_success_at.
+        did_sync = await poller.trigger_if_stale(max_age_seconds=30)
+        assert did_sync is True
+        assert poller.last_success_at is not None
+        assert deps["client"].fetch_today_schedule.await_count == 1
+
+        # Fresh sync (< 30s) -> skipped.
+        did_sync_again = await poller.trigger_if_stale(max_age_seconds=30)
+        assert did_sync_again is False
+        assert deps["client"].fetch_today_schedule.await_count == 1
+
+        # Aged sync (> 30s) -> triggers another tick.
+        poller.last_success_at = datetime.now() - timedelta(seconds=60)
+        did_sync_stale = await poller.trigger_if_stale(max_age_seconds=30)
+        assert did_sync_stale is True
+        assert deps["client"].fetch_today_schedule.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_trigger_if_stale_returns_false_when_persist_fails(poller_deps):
+    from datetime import timedelta
+
+    deps = poller_deps
+    deps["repo"].upsert_schedules = AsyncMock(side_effect=RuntimeError("db down"))
+    poller = AdaptivePoller(
+        client=deps["client"],
+        repo=deps["repo"],
+        dispatcher=deps["dispatcher"],
+        scheduler=deps["scheduler"],
+    )
+    stale_at = datetime.now() - timedelta(seconds=120)
+    poller.last_success_at = stale_at
+
+    with patch("app.services.poller.parse_daily_schedule", return_value=[]):
+        did_sync = await poller.trigger_if_stale(max_age_seconds=30)
+
+    assert did_sync is False
+    assert poller.last_success_at == stale_at
