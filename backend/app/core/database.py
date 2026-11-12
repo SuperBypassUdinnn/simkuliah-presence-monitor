@@ -296,6 +296,46 @@ class DatabaseRepository:
 
         return await self._with_retry(operation, "resolve_schedule_id")
 
+    async def get_meeting_context(self, meeting_id: int) -> dict[str, Any] | None:
+        """Fetch one meeting with its parent schedule's course code and class group."""
+
+        def operation() -> Any:
+            response = (
+                self.client.table(_TABLE_MEETINGS)
+                .select(
+                    "id,schedule_id,meeting_number,simkuliah_status,"
+                    "schedules(id,course_code,class_group)"
+                )
+                .eq("id", meeting_id)
+                .limit(1)
+                .execute()
+            )
+            data = response.data or []
+            return data[0] if data else None
+
+        return await self._with_retry(operation, "get_meeting_context")
+
+    async def mark_meeting_present(self, meeting_id: int, *, now: datetime | None = None) -> None:
+        """Record confirmed attendance in Supabase after Simkuliah accepted it.
+
+        Clears any local override so the confirmed Simkuliah presence holds
+        precedence.
+        """
+        moment = as_wib(now) if now is not None else now_wib()
+
+        def operation() -> None:
+            self.client.table(_TABLE_MEETINGS).update(
+                {
+                    "simkuliah_status": "hadir",
+                    "student_confirmed_at": moment.isoformat(),
+                }
+            ).eq("id", meeting_id).execute()
+            self.client.table(_TABLE_LOCAL_OVERRIDES).delete().eq(
+                "meeting_id", meeting_id
+            ).execute()
+
+        await self._with_retry(operation, "mark_meeting_present")
+
     # ------------------------------------------------------------------ #
     # Incidents
     # ------------------------------------------------------------------ #

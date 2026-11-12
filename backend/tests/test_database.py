@@ -245,3 +245,28 @@ async def test_log_incident_calls_client_with_payload():
     assert payload["status_code"] == 504
     assert payload["snippet"] == "gateway timeout"
     repo.client.table().insert().execute.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_get_meeting_context_returns_row():
+    repo = DatabaseRepository(client=MagicMock())
+    row = {"id": 57, "schedule_id": 4, "meeting_number": 13}
+    repo.client.table().select().eq().limit().execute.return_value.data = [row]
+
+    result = await repo.get_meeting_context(57)
+    assert result == row
+
+
+@pytest.mark.asyncio
+async def test_mark_meeting_present_updates_meeting_and_clears_overrides():
+    repo = DatabaseRepository(client=MagicMock())
+    now = datetime(2026, 11, 12, 10, 15)
+    await repo.mark_meeting_present(57, now=now)
+
+    table_calls = [c.args[0] for c in repo.client.table.call_args_list]
+    assert "meetings" in table_calls
+    assert "local_overrides" in table_calls
+    update_payload = repo.client.table().update.call_args[0][0]
+    assert update_payload["simkuliah_status"] == "hadir"
+    assert update_payload["student_confirmed_at"] == as_wib(now).isoformat()
+    repo.client.table().delete().eq.assert_called_with("meeting_id", 57)

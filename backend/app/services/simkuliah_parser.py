@@ -49,6 +49,10 @@ class ParsedMeetingStatus(BaseModel):
     is_student_present: bool = False
     student_name: str | None = None
     course_code: str | None = None
+    class_group: str = ""
+    jadwal_mulai: str = ""
+    jadwal_berakhir: str = ""
+    sks_mengajar: str = "2"
 
 
 class ParsedMeetingCell(BaseModel):
@@ -169,6 +173,20 @@ _CLASS_GROUP_RE = re.compile(r"\(Kelas\s*:\s*([^)]+)\)")
 # lecturer has not opened presence, which must never be treated as a time.
 _CLOCK_RE = re.compile(r"\d{1,2}[:.]\d{2}(?::\d{2})?")
 
+# Simkuliah embeds the 7-field AJAX payload for each konfirmasi button inside an
+# inline jQuery click handler on the dashboard page.
+_KONFIRMASI_SCRIPT_RE = re.compile(
+    r'#konfirmasi-kehadiran-(\d+)["\']\)\.on\(["\']click["\'].*?'
+    r"var\s+kelas\s*=\s*'([^']*)';\s*"
+    r"var\s+kd_mt_kul_8\s*=\s*'([^']*)';\s*"
+    r"var\s+jadwal_mulai\s*=\s*'([^']*)';\s*"
+    r"var\s+jadwal_berakhir\s*=\s*'([^']*)';\s*"
+    r"var\s+pertemuan\s*=\s*'([^']*)';\s*"
+    r"var\s+sks_mengajar\s*=\s*'([^']*)';\s*"
+    r"var\s+id\s*=\s*'([^']*)';",
+    re.DOTALL,
+)
+
 # Matrix cell background classes -> normalized simkuliah_status.
 _CELL_STATUS_CLASSES = (
     ("table-success", "hadir"),
@@ -262,6 +280,21 @@ def parse_attendance_cards(html: str) -> list[ParsedMeetingStatus]:
     name_span = root.css_first("nav.header-navbar a span")
     student_name = name_span.text(strip=True) if name_span else None
 
+    script_by_btn_id: dict[int, tuple[str, str, str, str, str, str]] = {}
+    for m_script in _KONFIRMASI_SCRIPT_RE.finditer(html):
+        btn_id_str, kelas, kd_mt_kul8, mulai, berakhir, pertemuan, sks, _ = m_script.groups()
+        try:
+            script_by_btn_id[int(btn_id_str)] = (
+                kelas,
+                kd_mt_kul8,
+                mulai,
+                berakhir,
+                pertemuan,
+                sks,
+            )
+        except ValueError:
+            pass
+
     for card in root.css(".card"):
         header = card.css_first(".card-header h5")
         if not header or "absensi" not in header.text().lower():
@@ -269,12 +302,18 @@ def parse_attendance_cards(html: str) -> list[ParsedMeetingStatus]:
         status = ParsedMeetingStatus(is_open=False, student_name=student_name)
 
         header_text = header.text(strip=True)
+        m_kelas = re.search(r"absensi\s+kelas\s+([^\s|]+)", header_text, re.IGNORECASE)
+        if m_kelas:
+            status.class_group = m_kelas.group(1).strip()
         m_course = re.search(r"\|\s*([A-Z0-9]+)\s*-", header_text)
         if m_course:
             status.course_code = m_course.group(1).strip()
         m_meet = re.search(r"pertemuan ke-(\d+)", header_text, re.IGNORECASE)
         if m_meet:
             status.meeting_number = int(m_meet.group(1))
+        m_sks = re.search(r"sks\s+mengajar\s*:\s*(\d+)", header_text, re.IGNORECASE)
+        if m_sks:
+            status.sks_mengajar = m_sks.group(1).strip()
 
         card_html = card.html or ""
         if "anda sudah absen" in card_html.lower():
@@ -289,6 +328,8 @@ def parse_attendance_cards(html: str) -> list[ParsedMeetingStatus]:
                 # Kelas, Gedung, Ruang, Jam, Batas Absen. Only a real clock
                 # value means the lecturer opened presence; "Dosen belum
                 # absen" is the closed marker.
+                if tds[0] and not status.class_group:
+                    status.class_group = tds[0]
                 candidate = tds[4]
                 if _CLOCK_RE.fullmatch(candidate):
                     deadline_time = candidate
@@ -303,6 +344,19 @@ def parse_attendance_cards(html: str) -> list[ParsedMeetingStatus]:
                 status.schedule_id = int(btn_id.replace("konfirmasi-kehadiran-", ""))
             except ValueError:
                 pass
+
+        if status.schedule_id is not None and status.schedule_id in script_by_btn_id:
+            s_kelas, s_code, s_mulai, s_berakhir, _s_pert, s_sks = script_by_btn_id[
+                status.schedule_id
+            ]
+            if s_kelas:
+                status.class_group = s_kelas
+            if s_code and not status.course_code:
+                status.course_code = s_code
+            status.jadwal_mulai = s_mulai
+            status.jadwal_berakhir = s_berakhir
+            if s_sks:
+                status.sks_mengajar = s_sks
 
         # A konfirmasi button alone is not proof of an open window: Simkuliah
         # renders it even when "Batas Absen" says "Dosen belum absen". Open

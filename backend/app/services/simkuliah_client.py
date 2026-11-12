@@ -5,6 +5,7 @@ Key Components: SimkuliahClient
 
 from __future__ import annotations
 
+import re
 import time
 from typing import Any
 
@@ -231,12 +232,22 @@ class SimkuliahClient:
             response = await self._client.post(
                 f"{self.base_url}{PRESENCE_PATH}",
                 data=payload,
+                headers={
+                    "X-Requested-With": "XMLHttpRequest",
+                    "Referer": f"{self.base_url}{DASHBOARD_PATH}",
+                },
             )
             if response.status_code in SERVER_ERROR_STATUS_CODES:
                 return False
             response.raise_for_status()
             text = response.text if isinstance(response.text, str) else ""
-            return "success" in text.lower() or response.status_code == 200
+            lowered = text.strip().lower()
+            # Simkuliah's AJAX endpoint returns literal "success" on accept.
+            # An HTTP 200 HTML page (redirect to login or error template) or
+            # non-success string (e.g. "unsuccessful") must never pass.
+            if "<html" in lowered or "<!doctype" in lowered:
+                return False
+            return lowered == "success" or bool(re.search(r"\bsuccess\b", lowered))
         except httpx.HTTPError:
             return False
 
