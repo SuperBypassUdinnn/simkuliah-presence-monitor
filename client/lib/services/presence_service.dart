@@ -10,7 +10,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/error_message.dart';
 import '../models/meeting_model.dart';
+import '../models/schedule_customization_model.dart';
 import '../models/schedule_model.dart';
+import '../models/user_preferences_model.dart';
 
 /// Provides methods and streams for fetching today's meetings, the semester
 /// schedule matrix, and submitting presence overrides.
@@ -43,6 +45,8 @@ class PresenceService {
   static const String _tableSchedules = 'schedules';
   static const String _tableMeetings = 'meetings';
   static const String _tableOverrides = 'local_overrides';
+  static const String _tableScheduleCustomizations = 'schedule_customizations';
+  static const String _tableUserPreferences = 'user_preferences';
 
   static const Duration _retryDelay = Duration(milliseconds: 300);
 
@@ -208,5 +212,76 @@ class PresenceService {
         httpClient.close();
       }
     }
+  }
+
+  /// Fetch schedule customizations for the given schedule ids.
+  Future<List<ScheduleCustomizationModel>> fetchCustomizations(
+    List<int> scheduleIds,
+  ) async {
+    if (scheduleIds.isEmpty) return [];
+    final response = await _runWithResilience<List<Map<String, dynamic>>>(
+      () async => await _client
+          .from(_tableScheduleCustomizations)
+          .select('*')
+          .filter('schedule_id', 'in', scheduleIds),
+    );
+    return response.map(ScheduleCustomizationModel.fromJson).toList();
+  }
+
+  /// Save or update a schedule customization row.
+  Future<ScheduleCustomizationModel> saveCustomization(
+    ScheduleCustomizationModel customization,
+  ) async {
+    final payload = customization.toJson();
+    final response = await _runWithResilience<Map<String, dynamic>>(
+      () async => await _client
+          .from(_tableScheduleCustomizations)
+          .upsert(payload, onConflict: 'schedule_id,meeting_id')
+          .select()
+          .single(),
+      retry: false,
+    );
+    return ScheduleCustomizationModel.fromJson(response);
+  }
+
+  /// Delete a schedule customization by primary key id.
+  Future<void> deleteCustomization(int id) async {
+    await _runWithResilience<void>(
+      () => _client.from(_tableScheduleCustomizations).delete().eq('id', id),
+      retry: false,
+    );
+  }
+
+  /// Fetch user preferences, falling back to default values if not configured yet.
+  Future<UserPreferencesModel> fetchUserPreferences({
+    String userId = 'default_user',
+  }) async {
+    final response = await _runWithResilience<List<Map<String, dynamic>>>(
+      () async => await _client
+          .from(_tableUserPreferences)
+          .select('*')
+          .eq('user_id', userId)
+          .limit(1),
+    );
+    if (response.isEmpty) {
+      return UserPreferencesModel(userId: userId);
+    }
+    return UserPreferencesModel.fromJson(response.first);
+  }
+
+  /// Save or update user preferences.
+  Future<UserPreferencesModel> saveUserPreferences(
+    UserPreferencesModel preferences,
+  ) async {
+    final payload = preferences.toJson();
+    final response = await _runWithResilience<Map<String, dynamic>>(
+      () async => await _client
+          .from(_tableUserPreferences)
+          .upsert(payload, onConflict: 'user_id')
+          .select()
+          .single(),
+      retry: false,
+    );
+    return UserPreferencesModel.fromJson(response);
   }
 }
