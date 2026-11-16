@@ -39,6 +39,11 @@
             android:name="flutterEmbedding"
             android:value="2" />
 
+        <!-- Action broadcast receiver for notification interactive action buttons -->
+        <receiver
+            android:name="com.dexterous.flutterlocalnotifications.ActionBroadcastReceiver"
+            android:exported="false" />
+
         <!-- Background keep-alive service (flutter_foreground_task).
              Warning: do not change the service name. -->
         <service
