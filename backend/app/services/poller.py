@@ -17,6 +17,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from app.core.database import DatabaseRepository
 from app.core.time_zone import naive_wib_now
 from app.services.ntfy_service import NtfyDispatcher
+from app.services.presence_confirmer import confirm_meeting_on_simkuliah
 from app.services.simkuliah_client import SimkuliahClient
 from app.services.simkuliah_parser import (
     ParsedMeetingStatus,
@@ -56,10 +57,49 @@ def _page_title(html: str) -> str:
     return " ".join(match.group(1).split())[:120]
 
 
+def compute_effective_lecture_times(
+    base_start: time,
+    base_end: time,
+    customization: dict[str, Any] | None,
+    base_date: datetime.date,
+) -> tuple[time, time]:
+    """Calculate effective start and end times applying absolute or relative overrides.
+
+    Handles midnight crossings safely without ValueError on time arithmetic.
+    """
+    if not customization:
+        return base_start, base_end
+
+    custom_start = customization.get("custom_start_time")
+    custom_end = customization.get("custom_end_time")
+    if custom_start and custom_end:
+        try:
+            s_time = (
+                custom_start
+                if isinstance(custom_start, time)
+                else time.fromisoformat(str(custom_start))
+            )
+            e_time = (
+                custom_end if isinstance(custom_end, time) else time.fromisoformat(str(custom_end))
+            )
+            return s_time, e_time
+        except ValueError:
+            pass
+
+    offset_minutes = int(customization.get("time_offset_minutes") or 0)
+    if offset_minutes != 0:
+        start_dt = datetime.combine(base_date, base_start) + timedelta(minutes=offset_minutes)
+        end_dt = datetime.combine(base_date, base_end) + timedelta(minutes=offset_minutes)
+        return start_dt.time(), end_dt.time()
+
+    return base_start, base_end
+
+
 def calculate_next_poll_interval(
     now: datetime,
     active_lectures: list[tuple[time, time]],
     *,
+    upcoming_reminders: list[datetime] | None = None,
     min_idle_interval_seconds: int = _DEFAULT_IDLE_INTERVAL_SECONDS,
 ) -> int:
     """Return the recommended poll interval in seconds.
@@ -68,22 +108,27 @@ def calculate_next_poll_interval(
         now: Current time.
         active_lectures: List of ``(start_time, end_time)`` tuples for today's
             lectures.
+        upcoming_reminders: Optional list of reminder datetimes before classes.
         min_idle_interval_seconds: Minimum interval returned when idle
             (default 7200 seconds / 2 hours).
 
     Returns:
         60 when within an active lecture, 120 when within pre-class
         observation (10 minutes before a lecture starts), or the time until
-        the next pre-class observation window (capped at
+        the next pre-class observation window or advance reminder (capped at
         ``min_idle_interval_seconds``) so an idle tick never oversleeps past
-        an upcoming lecture's start and attendance window.
+        an upcoming lecture's start, reminder, and attendance window.
     """
     now_time = now.time()
 
     for start_time, end_time in active_lectures:
         # Active lecture (inclusive of both boundaries).
-        if start_time <= now_time <= end_time:
-            return 60
+        if start_time <= end_time:
+            if start_time <= now_time <= end_time:
+                return 60
+        else:
+            if now_time >= start_time or now_time <= end_time:
+                return 60
 
     upcoming_waits: list[int] = []
     for start_time, _end_time in active_lectures:
@@ -94,6 +139,11 @@ def calculate_next_poll_interval(
             return 120
         if now < pre_class_dt:
             upcoming_waits.append(max(60, int((pre_class_dt - now).total_seconds())))
+
+    if upcoming_reminders:
+        for rem_dt in upcoming_reminders:
+            if now < rem_dt:
+                upcoming_waits.append(max(60, int((rem_dt - now).total_seconds())))
 
     if upcoming_waits:
         return min(min_idle_interval_seconds, min(upcoming_waits))
@@ -320,24 +370,64 @@ class AdaptivePoller:
         # dates, and Simkuliah status) from the same today-page matrix.
         await self._sync_meetings_from_today(html)
 
-        # Build the list of active lectures (start, end) for interval calc.
-        active_lectures: list[tuple[time, time]] = []
-        for item in items:
+        # Fetch global user preferences for default advance reminders.
+        user_prefs: dict[str, Any] = {}
+        if hasattr(self.repo, "get_user_preferences"):
             try:
-                start_time = time.fromisoformat(item.start_time)
-                end_time = time.fromisoformat(item.end_time)
-            except ValueError:
-                continue
-            active_lectures.append((start_time, end_time))
+                user_prefs = await self.repo.get_user_preferences() or {}
+            except Exception as exc:  # noqa: BLE001 - non-fatal
+                logger.warning("user preferences fetch failed: %s", exc)
+        default_lead = int(user_prefs.get("default_reminder_minutes", 15))
 
-        # Compute the adaptive interval and reschedule the job accordingly.
-        # The WIB wall clock is authoritative: schedule times, "Batas Absen",
-        # and the state machine all speak WIB, while a UTC container would
-        # otherwise shift every comparison by seven hours.
+        # Build the list of active lectures and upcoming advance reminders.
         now = naive_wib_now()
         await self._load_notified_ranks(now)
+
+        active_lectures: list[tuple[time, time]] = []
+        upcoming_reminders: list[datetime] = []
+        course_customizations: dict[str, dict[str, Any] | None] = {}
+
+        for item in items:
+            try:
+                base_start = time.fromisoformat(item.start_time)
+                base_end = time.fromisoformat(item.end_time)
+            except ValueError:
+                continue
+
+            cust: dict[str, Any] | None = None
+            if hasattr(self.repo, "resolve_schedule_id") and hasattr(
+                self.repo, "resolve_effective_customization"
+            ):
+                try:
+                    sched_id = await self.repo.resolve_schedule_id(
+                        item.course_code, item.class_group
+                    )
+                    if sched_id is not None:
+                        cust = await self.repo.resolve_effective_customization(sched_id)
+                except Exception:  # noqa: BLE001 - non-fatal
+                    cust = None
+            course_customizations[item.course_code] = cust
+
+            eff_start, eff_end = compute_effective_lecture_times(
+                base_start, base_end, cust, now.date()
+            )
+            active_lectures.append((eff_start, eff_end))
+
+            lead = (
+                int(cust.get("reminder_lead_minutes"))
+                if cust and cust.get("reminder_lead_minutes") is not None
+                else default_lead
+            )
+            if lead > 0:
+                rem_dt = datetime.combine(now.date(), eff_start) - timedelta(minutes=lead)
+                upcoming_reminders.append(rem_dt)
+
+        # Compute the adaptive interval and reschedule the job accordingly.
         interval = calculate_next_poll_interval(
-            now, active_lectures, min_idle_interval_seconds=self._idle_interval()
+            now,
+            active_lectures,
+            upcoming_reminders=upcoming_reminders,
+            min_idle_interval_seconds=self._idle_interval(),
         )
         self._reschedule(interval)
 
@@ -385,9 +475,7 @@ class AdaptivePoller:
                         deadline_at = None
 
             # Resolve the Supabase schedule row from the course and parsed
-            # class group. The parsed class group is authoritative:
-            # defaulting to A would miss every course whose real group
-            # differs. Resolved even without a card so overrides still work.
+            # class group.
             try:
                 schedule_id = await self.repo.resolve_schedule_id(
                     item.course_code, item.class_group
@@ -395,9 +483,7 @@ class AdaptivePoller:
             except Exception:  # noqa: BLE001 - non-fatal
                 schedule_id = None
 
-            # Persist the live card data (deadline, lecturer-opened, hadir
-            # when already absen) so the client sees real state. The DB ids
-            # are passed explicitly because the card carries Simkuliah's id.
+            # Persist the live card data.
             if meeting_status is not None and schedule_id is not None and meeting_no is not None:
                 try:
                     await self.repo.record_meeting_status(
@@ -429,12 +515,35 @@ class AdaptivePoller:
                     logger.warning("override lookup failed for %s P%s", schedule_id, meeting_no)
                     has_override = False
 
+            # Resolve meeting-specific customization if meeting_id is present.
+            customization = course_customizations.get(item.course_code)
+            if (
+                meeting_id is not None
+                and schedule_id is not None
+                and hasattr(self.repo, "resolve_effective_customization")
+            ):
+                try:
+                    customization = await self.repo.resolve_effective_customization(
+                        schedule_id=schedule_id, meeting_id=meeting_id
+                    )
+                except Exception:  # noqa: BLE001 - non-fatal
+                    customization = course_customizations.get(item.course_code)
+
+            eff_start, eff_end = compute_effective_lecture_times(
+                start_time, end_time, customization, now.date()
+            )
+            reminder_lead = (
+                int(customization.get("reminder_lead_minutes"))
+                if customization and customization.get("reminder_lead_minutes") is not None
+                else default_lead
+            )
+            auto_presence_enabled = (
+                bool(customization.get("auto_presence_enabled")) if customization else False
+            )
+
             meeting_key: int | str = schedule_id if schedule_id is not None else item.course_code
             last_level = self._last_levels.get(meeting_key)
             if last_level is None and meeting_id is not None:
-                # Fall back to the persistent notification log so a freshly
-                # restarted backend (Render redeploy / free-tier restart) does
-                # not re-dispatch states a previous instance already sent.
                 last_rank = self._notified_ranks.get(meeting_id)
                 if last_rank is not None:
                     for level in NotificationLevel:
@@ -443,16 +552,47 @@ class AdaptivePoller:
                             self._last_levels[meeting_key] = level
                             break
 
-            state = evaluate_notification_state(
-                now=now,
-                start_time=start_time,
-                end_time=end_time,
-                is_dosen_open=is_dosen_open,
-                is_student_present=is_student_present,
-                has_override=has_override,
-                last_notified_level=last_level,
-                deadline_at=deadline_at,
-            )
+            # Autonomous presence confirmation if lecturer has opened attendance.
+            state: NotificationLevel | None = None
+            if (
+                is_dosen_open
+                and not is_student_present
+                and auto_presence_enabled
+                and not has_override
+            ):
+                try:
+                    await confirm_meeting_on_simkuliah(
+                        client=self.client,
+                        repo=self.repo,
+                        meeting_id=meeting_id,
+                        schedule_id=simkuliah_schedule_id,
+                        db_schedule_id=schedule_id,
+                        meeting_no=meeting_no,
+                        course_code=item.course_code,
+                        class_group=item.class_group,
+                    )
+                    state = NotificationLevel.AUTO_CONFIRMED
+                    is_student_present = True
+                except Exception as exc:  # noqa: BLE001 - non-fatal alert
+                    logger.warning(
+                        "auto presence confirmation failed for %s: %s",
+                        item.course_code,
+                        exc,
+                    )
+                    state = NotificationLevel.AUTO_PRESENCE_FAILED
+            else:
+                state = evaluate_notification_state(
+                    now=now,
+                    start_time=eff_start,
+                    end_time=eff_end,
+                    is_dosen_open=is_dosen_open,
+                    is_student_present=is_student_present,
+                    has_override=has_override,
+                    last_notified_level=last_level,
+                    deadline_at=deadline_at,
+                    reminder_lead_minutes=reminder_lead,
+                )
+
             if state is None:
                 continue
 
@@ -466,11 +606,8 @@ class AdaptivePoller:
                 "course_name": item.course_name,
                 "room": item.room,
                 "lecturer": item.lecturer,
-                # confirm_presence talks to Simkuliah and needs its jadwal id;
-                # override actions resolve a meetings row and need the
-                # Supabase id. Never substitute one for the other: when the
-                # Simkuliah id is unknown the confirm button is omitted
-                # upstream instead of silently sending the Supabase id.
+                "start_time": eff_start.strftime("%H:%M"),
+                "lead_minutes": reminder_lead,
                 "schedule_id": simkuliah_schedule_id,
                 "db_schedule_id": schedule_id,
                 "meeting_no": meeting_no,
