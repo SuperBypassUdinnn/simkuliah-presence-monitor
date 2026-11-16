@@ -21,7 +21,7 @@ from app.services.poller import (
     calculate_next_poll_interval,
 )
 from app.services.simkuliah_parser import ParsedScheduleItem
-from app.services.state_machine import NotificationLevel
+from app.services.state_machine import NotificationLevel, rank_for_level
 
 # --------------------------------------------------------------------------- #
 # Helpers
@@ -660,7 +660,9 @@ async def test_poller_reuses_persistent_notification_log_after_restart(poller_de
     seeds the monotonic guard."""
     deps = poller_deps
     deps["repo"].list_today_meeting_ids = AsyncMock(return_value=[183])
-    deps["repo"].load_notified_levels = AsyncMock(return_value={183: 4})
+    deps["repo"].load_notified_levels = AsyncMock(
+        return_value={183: rank_for_level(NotificationLevel.WINDOW_EXPIRED)}
+    )
     deps["repo"].resolve_schedule_id = AsyncMock(return_value=13)
     deps["repo"].resolve_meeting_id = AsyncMock(return_value=183)
     deps["repo"].get_active_override = AsyncMock(return_value=None)
@@ -760,8 +762,10 @@ async def test_poller_logs_new_state_to_notification_log(poller_deps):
         await poller._tick()
 
     deps["dispatcher"].dispatch.assert_called_once()
-    deps["repo"].log_notification.assert_called_once_with(183, 4)
-    assert poller._notified_ranks == {183: 4}
+    deps["repo"].log_notification.assert_called_once_with(
+        183, rank_for_level(NotificationLevel.WINDOW_EXPIRED)
+    )
+    assert poller._notified_ranks == {183: rank_for_level(NotificationLevel.WINDOW_EXPIRED)}
 
 
 @pytest.mark.asyncio
