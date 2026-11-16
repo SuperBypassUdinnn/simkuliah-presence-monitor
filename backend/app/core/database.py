@@ -6,6 +6,7 @@ Key Components: DatabaseRepository
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -24,6 +25,8 @@ _TABLE_MEETINGS = "meetings"
 _TABLE_LOCAL_OVERRIDES = "local_overrides"
 _TABLE_INCIDENTS = "incidents"
 _TABLE_DEVICE_TOKENS = "device_tokens"
+_TABLE_USER_PREFERENCES = "user_preferences"
+_TABLE_SCHEDULE_CUSTOMIZATIONS = "schedule_customizations"
 
 # Maximum number of attempts for an intermittent database call.
 _MAX_RETRIES = 3
@@ -40,7 +43,13 @@ class DatabaseRepository:
             offline tests.
     """
 
-    def __init__(self, client: Any = None) -> None:
+    def __init__(
+        self,
+        client: Any = None,
+        *,
+        supabase_url: str | None = None,
+        supabase_key: str | None = None,
+    ) -> None:
         if client is not None:
             self.client = client
         else:
@@ -49,8 +58,8 @@ class DatabaseRepository:
             from app.config import settings
 
             self.client = create_client(
-                settings.SUPABASE_URL,
-                settings.SUPABASE_SERVICE_ROLE_KEY,
+                supabase_url or settings.SUPABASE_URL,
+                supabase_key or settings.SUPABASE_SERVICE_ROLE_KEY,
             )
 
     # ------------------------------------------------------------------ #
@@ -483,3 +492,104 @@ class DatabaseRepository:
             (self.client.table(_TABLE_DEVICE_TOKENS).delete().in_("token", tokens).execute())
         except Exception as exc:  # noqa: BLE001 - best effort only
             logger.warning("device token prune failed: %s", exc)
+
+    # ------------------------------------------------------------------ #
+    # User preferences and schedule customizations
+    # ------------------------------------------------------------------ #
+
+    async def get_user_preferences(self, user_id: str = "default_user") -> dict[str, Any]:
+        """Return the preference row for ``user_id``, or ``None`` when absent."""
+
+        def operation() -> Any:
+            response = (
+                self.client.table(_TABLE_USER_PREFERENCES)
+                .select("*")
+                .eq("user_id", user_id)
+                .limit(1)
+                .execute()
+            )
+            data = response.data or []
+            return data[0] if data else None
+
+        return await self._with_retry(operation, "get_user_preferences")
+
+    async def upsert_user_preferences(self, preferences: dict[str, Any]) -> dict[str, Any]:
+        """Insert or replace the preference row keyed by ``user_id``."""
+
+        def operation() -> Any:
+            response = (
+                self.client.table(_TABLE_USER_PREFERENCES)
+                .upsert(preferences, on_conflict="user_id")
+                .execute()
+            )
+            data = response.data or []
+            return data[0] if data else {}
+
+        return await self._with_retry(operation, "upsert_user_preferences")
+
+    async def get_schedule_customizations(
+        self, schedule_ids: list[int] | None = None
+    ) -> list[dict[str, Any]]:
+        """Return schedule customizations, optionally filtered to ``schedule_ids``."""
+
+        def operation() -> Any:
+            query = self.client.table(_TABLE_SCHEDULE_CUSTOMIZATIONS).select("*")
+            if schedule_ids:
+                query = query.in_("schedule_id", schedule_ids)
+            response = query.execute()
+            return response.data or []
+
+        return await self._with_retry(operation, "get_schedule_customizations")
+
+    async def upsert_schedule_customization(self, customization: dict[str, Any]) -> dict[str, Any]:
+        """Insert or update a schedule customization on ``(schedule_id, meeting_id)``."""
+
+        def operation() -> Any:
+            response = (
+                self.client.table(_TABLE_SCHEDULE_CUSTOMIZATIONS)
+                .upsert(customization, on_conflict="schedule_id,meeting_id")
+                .execute()
+            )
+            data = response.data or []
+            return data[0] if data else {}
+
+        return await self._with_retry(operation, "upsert_schedule_customization")
+
+    async def delete_schedule_customization(self, customization_id: int) -> bool:
+        """Delete a schedule customization by id.
+
+        Return ``True`` when a row was removed, ``False`` when none matched.
+        """
+
+        def operation() -> Any:
+            response = (
+                self.client.table(_TABLE_SCHEDULE_CUSTOMIZATIONS)
+                .delete()
+                .eq("id", customization_id)
+                .execute()
+            )
+            return bool(response.data)
+
+        return await self._with_retry(operation, "delete_schedule_customization")
+
+    async def resolve_effective_customization(
+        self, schedule_id: int, meeting_id: int | None = None
+    ) -> dict[str, Any] | None:
+        """Resolve the effective customization for a schedule.
+
+        Meeting-level customizations (``meeting_id`` set) take precedence over
+        schedule-level ones (``meeting_id`` is NULL). Falls back to ``None``
+        when no customization exists for the schedule.
+        """
+        rows = self.get_schedule_customizations([schedule_id])
+        if inspect.isawaitable(rows):
+            rows = await rows
+
+        best: dict[str, Any] | None = None
+        for row in rows:
+            row_meeting_id = row.get("meeting_id")
+            if meeting_id is not None and row_meeting_id == meeting_id:
+                return row
+            if row_meeting_id is None and best is None:
+                best = row
+        return best
