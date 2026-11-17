@@ -164,10 +164,12 @@ class _ActivePresenceViewState extends State<ActivePresenceView> {
         padding: const EdgeInsets.all(16),
         itemCount: activeMeetings.length,
         itemBuilder: (context, index) {
+          final meeting = activeMeetings[index];
           return Padding(
             padding: const EdgeInsets.only(bottom: 14),
             child: ActiveLectureCard(
-              meeting: activeMeetings[index],
+              meeting: meeting,
+              customization: meeting.customization,
               presenceService: _service,
               onStatusChanged: () =>
                   unawaited(_load(silent: true, force: true)),

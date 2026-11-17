@@ -10,7 +10,6 @@ import '../../models/meeting_model.dart';
 import '../../models/schedule_customization_model.dart';
 import '../../services/presence_service.dart';
 import 'countdown_timer.dart';
-import 'schedule_customization_dialog.dart';
 
 /// A Material 3 card for a single lecture meeting in today's feed or active presence.
 ///
@@ -44,6 +43,7 @@ class _ActiveLectureCardState extends State<ActiveLectureCard> {
   late PresenceService _service;
   String? _activeOverride;
   bool _submitting = false;
+  bool _autoPresence = false;
 
   @override
   void initState() {
@@ -52,6 +52,7 @@ class _ActiveLectureCardState extends State<ActiveLectureCard> {
     _activeOverride = widget.meeting.localOverride?['override_type']
         ?.toString()
         .toLowerCase();
+    _autoPresence = widget.customization?.autoPresenceEnabled ?? false;
   }
 
   @override
@@ -60,6 +61,43 @@ class _ActiveLectureCardState extends State<ActiveLectureCard> {
     _activeOverride = widget.meeting.localOverride?['override_type']
         ?.toString()
         .toLowerCase();
+    _autoPresence = widget.customization?.autoPresenceEnabled ?? false;
+  }
+
+  Future<void> _handleToggleAutoPresence(bool value) async {
+    final prev = _autoPresence;
+    setState(() => _autoPresence = value);
+    try {
+      final saved = await _service.saveMeetingAutoPresence(
+        scheduleId: widget.meeting.scheduleId ?? 0,
+        meetingId: widget.meeting.id,
+        enabled: value,
+      );
+      if (mounted) {
+        AppNotification.show(
+          context,
+          title: value ? 'Auto-Absen Aktif' : 'Auto-Absen Dinonaktifkan',
+          message: value
+              ? 'Presensi pertemuan ke-${widget.meeting.meetingNumber} akan otomatis dikonfirmasi begitu dosen membuka absensi.'
+              : 'Presensi otomatis untuk pertemuan ini dinonaktifkan.',
+          color: value ? Colors.amber.shade800 : Colors.blueGrey,
+          icon: value ? Icons.bolt : Icons.power_settings_new,
+        );
+        widget.onCustomizationChanged?.call(saved);
+        widget.onStatusChanged?.call();
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() => _autoPresence = prev);
+        AppNotification.show(
+          context,
+          title: 'Gagal Mengubah Auto-Absen',
+          message: friendlyErrorMessage(error),
+          color: Colors.red.shade600,
+          icon: Icons.error_outline,
+        );
+      }
+    }
   }
 
   Future<bool> _showConfirmDialog({
@@ -571,28 +609,6 @@ class _ActiveLectureCardState extends State<ActiveLectureCard> {
                     ],
                   ),
                 ),
-                IconButton(
-                  icon: const Icon(Icons.tune, size: 20),
-                  tooltip: 'Sesuaikan Jadwal & Automasi',
-                  onPressed: () {
-                    showDialog(
-                      context: context,
-                      builder: (_) => ScheduleCustomizationDialog(
-                        courseName: widget.meeting.courseName,
-                        courseCode: widget.meeting.courseCode,
-                        scheduleId: widget.meeting.scheduleId ?? 0,
-                        meetingId: widget.meeting.id,
-                        meetingNumber: widget.meeting.meetingNumber,
-                        initialCustomization: widget.customization,
-                        presenceService: _service,
-                        onSaved: (saved) {
-                          widget.onCustomizationChanged?.call(saved);
-                          widget.onStatusChanged?.call();
-                        },
-                      ),
-                    );
-                  },
-                ),
               ],
             ),
             const SizedBox(height: 12),
@@ -712,6 +728,64 @@ class _ActiveLectureCardState extends State<ActiveLectureCard> {
             ),
             const SizedBox(height: 14),
             _buildStatusBanner(context),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(
+                color: _autoPresence
+                    ? Colors.amber.withValues(alpha: 0.12)
+                    : Colors.grey.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: _autoPresence
+                      ? Colors.amber.shade400
+                      : Colors.grey.shade300,
+                  width: 0.8,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.bolt,
+                    size: 20,
+                    color: _autoPresence ? Colors.amber.shade800 : Colors.grey,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Auto-Absen Pertemuan Ini',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: _autoPresence
+                                ? FontWeight.bold
+                                : FontWeight.normal,
+                            color: _autoPresence ? Colors.amber.shade900 : null,
+                          ),
+                        ),
+                        Text(
+                          _autoPresence
+                              ? 'Aktif: otomatis absen saat dosen buka presensi'
+                              : 'Nonaktif: lakukan presensi manual',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.grey.shade600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Switch(
+                    value: _autoPresence,
+                    onChanged: widget.meeting.isAttended
+                        ? null
+                        : _handleToggleAutoPresence,
+                  ),
+                ],
+              ),
+            ),
             if (canPerformPresence) ...[
               const SizedBox(height: 12),
               Row(

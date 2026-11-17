@@ -20,6 +20,7 @@ import 'services/push_notification_service.dart';
 import 'services/realtime_alert_service.dart';
 import 'views/active_presence_view.dart';
 import 'views/semester_matrix_view.dart';
+import 'views/settings_automation_view.dart';
 import 'views/today_feed_view.dart';
 
 Future<void> main(List<String> args) async {
@@ -309,6 +310,7 @@ class _MainHomeScreenState extends State<MainHomeScreen>
     ActivePresenceView(),
     TodayFeedView(),
     SemesterMatrixView(),
+    SettingsAutomationView(),
   ];
 
   Widget _buildNavItem({
@@ -454,6 +456,12 @@ class _MainHomeScreenState extends State<MainHomeScreen>
             selectedIcon: Icons.table_chart,
             label: 'Matriks Semester',
           ),
+          _buildNavItem(
+            index: 3,
+            icon: Icons.tune_outlined,
+            selectedIcon: Icons.tune,
+            label: 'Pengaturan',
+          ),
 
           const Spacer(),
 
@@ -559,6 +567,11 @@ class _MainHomeScreenState extends State<MainHomeScreen>
             icon: Icon(Icons.table_chart_outlined),
             selectedIcon: Icon(Icons.table_chart),
             label: 'Matriks Semester',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.tune_outlined),
+            selectedIcon: Icon(Icons.tune),
+            label: 'Pengaturan',
           ),
         ],
       ),
