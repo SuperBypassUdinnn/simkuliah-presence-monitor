@@ -54,9 +54,10 @@ static void my_application_activate(GApplication* application) {
   // Single-instance activation: with a unique GApplication, a second launch
   // forwards "activate" to the running instance (possibly hidden in the
   // tray); re-show the existing window instead of creating another Flutter
-  // view.
+  // view. Recursively show all children (FlView) so windows waking from
+  // --hidden autostart are fully mapped and rendered.
   if (self->first_window != nullptr) {
-    gtk_widget_show(GTK_WIDGET(self->first_window));
+    gtk_widget_show_all(GTK_WIDGET(self->first_window));
     gtk_window_present(self->first_window);
     return;
   }
