@@ -10,6 +10,55 @@ import '../../models/meeting_model.dart';
 import '../../services/presence_service.dart';
 import 'schedule_customization_dialog.dart';
 
+/// Effective lecture window after applying a schedule customization.
+///
+/// Absolute overrides (`custom_start_time` / `custom_end_time`) win over the
+/// relative `time_offset_minutes`, mirroring the backend resolution order.
+String _effectiveTimeLabel(MeetingModel meeting) {
+  final official = '${meeting.startTimeShort} - ${meeting.endTimeShort} WIB';
+  final customization = meeting.customization;
+  if (customization == null) return official;
+
+  final customStart = customization.customStartTime;
+  final customEnd = customization.customEndTime;
+  if (customStart != null && customEnd != null) {
+    return '${_shortTime(customStart)} - ${_shortTime(customEnd)} WIB '
+        '(Portal: ${meeting.startTimeShort} - ${meeting.endTimeShort})';
+  }
+
+  final offset = customization.timeOffsetMinutes;
+  if (offset == 0 || meeting.startTime.isEmpty) return official;
+  final shiftedStart = _shiftTime(meeting.startTimeShort, offset);
+  final shiftedEnd = _shiftTime(meeting.endTimeShort, offset);
+  if (shiftedStart == null || shiftedEnd == null) return official;
+  return '$shiftedStart - $shiftedEnd WIB '
+      '(Portal: ${meeting.startTimeShort} - ${meeting.endTimeShort})';
+}
+
+/// Trim a database time string to `HH:mm`.
+String _shortTime(String raw) {
+  final match = RegExp(r'(\d{2})[:.](\d{2})').firstMatch(raw);
+  if (match == null) return raw;
+  return '${match.group(1)}:${match.group(2)}';
+}
+
+/// Shift an `HH:mm` string by a signed minute count.
+String? _shiftTime(String hhmm, int minutes) {
+  final match = RegExp(r'(\d{2}):(\d{2})').firstMatch(hhmm);
+  if (match == null) return null;
+  final base = DateTime(
+    2000,
+    1,
+    1,
+    int.parse(match.group(1)!),
+    int.parse(match.group(2)!),
+  );
+  final shifted = base.add(Duration(minutes: minutes));
+  final hour = shifted.hour.toString().padLeft(2, '0');
+  final minute = shifted.minute.toString().padLeft(2, '0');
+  return '$hour:$minute';
+}
+
 /// Statuses used to color a meeting indicator in the semester matrix.
 enum _MeetingIndicatorStatus {
   hadir,
@@ -124,10 +173,7 @@ class MeetingGridTile extends StatelessWidget {
                   if (meeting.meetingDate.isNotEmpty)
                     _detailRow('Tanggal', meeting.meetingDate),
                   if (meeting.startTime.isNotEmpty)
-                    _detailRow(
-                      'Jam',
-                      '${meeting.startTimeShort} - ${meeting.endTimeShort} WIB',
-                    ),
+                    _detailRow('Jam', _effectiveTimeLabel(meeting)),
                   if (meeting.room.isNotEmpty)
                     _detailRow('Ruang', meeting.room),
                   if (meeting.lecturerName.isNotEmpty &&

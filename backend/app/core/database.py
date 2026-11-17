@@ -565,12 +565,16 @@ class DatabaseRepository:
                     existing_id = found.data[0].get("id")
                     payload["id"] = existing_id
 
-            conflict_target = "id" if existing_id is not None else "schedule_id,meeting_id"
-            response = (
-                self.client.table(_TABLE_SCHEDULE_CUSTOMIZATIONS)
-                .upsert(payload, on_conflict=conflict_target)
-                .execute()
-            )
+            table = self.client.table(_TABLE_SCHEDULE_CUSTOMIZATIONS)
+            if existing_id is not None:
+                # Update the resolved row by primary key. The partial unique
+                # indexes cannot serve as an ON CONFLICT target, so the id is
+                # the only deterministic arbiter.
+                response = table.upsert(payload, on_conflict="id").execute()
+            else:
+                # No row exists yet: plain insert. The partial unique indexes
+                # still reject a concurrent duplicate.
+                response = table.insert(payload).execute()
             data = response.data or []
             return data[0] if data else {}
 

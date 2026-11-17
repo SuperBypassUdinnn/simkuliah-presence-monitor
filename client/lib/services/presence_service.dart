@@ -147,7 +147,8 @@ class PresenceService {
     return courseLevel;
   }
 
-  /// Fetch the full semester schedule matrix with all nested meetings.
+  /// Fetch the full semester schedule matrix with all nested meetings and
+  /// their resolved customizations attached.
   Future<List<ScheduleModel>> fetchSemesterMatrix() async {
     final response = await _runWithResilience<List<Map<String, dynamic>>>(
       () async => await _client
@@ -155,7 +156,32 @@ class PresenceService {
           .select('*, meetings(*, local_overrides(*))')
           .order('course_code'),
     );
-    return response.map(ScheduleModel.fromJson).toList();
+    final schedules = response.map(ScheduleModel.fromJson).toList();
+    final scheduleIds = schedules.map((s) => s.id).toList();
+
+    List<ScheduleCustomizationModel> customizations = const [];
+    if (scheduleIds.isNotEmpty) {
+      try {
+        customizations = await fetchCustomizations(scheduleIds);
+      } catch (_) {
+        // Non-fatal: the matrix still renders official portal times.
+      }
+    }
+
+    return schedules.map((schedule) {
+      final meetings = schedule.meetings
+          .map(
+            (m) => m.copyWith(
+              customization: _resolveEffectiveCustomization(
+                customizations,
+                schedule.id,
+                m.id,
+              ),
+            ),
+          )
+          .toList();
+      return schedule.copyWith(meetings: meetings);
+    }).toList();
   }
 
   /// Fetch the meetings of one schedule, ordered by meeting number.
@@ -296,16 +322,23 @@ class PresenceService {
       }
     }
 
-    final conflict = payload.containsKey('id') && payload['id'] != null
-        ? 'id'
-        : 'schedule_id,meeting_id';
-
+    final resolvedId = payload['id'];
     final response = await _runWithResilience<Map<String, dynamic>>(
-      () async => await _client
-          .from(_tableScheduleCustomizations)
-          .upsert(payload, onConflict: conflict)
-          .select()
-          .single(),
+      () async => resolvedId != null
+          // Update the resolved row by primary key: the partial unique indexes
+          // cannot serve as an ON CONFLICT target.
+          ? await _client
+                .from(_tableScheduleCustomizations)
+                .upsert(payload, onConflict: 'id')
+                .select()
+                .single()
+          // Brand-new row: plain insert, the partial unique indexes still
+          // reject a concurrent duplicate.
+          : await _client
+                .from(_tableScheduleCustomizations)
+                .insert(payload)
+                .select()
+                .single(),
       retry: false,
     );
     return ScheduleCustomizationModel.fromJson(response);
@@ -335,16 +368,19 @@ class PresenceService {
       payload['id'] = existing.first['id'];
     }
 
-    final conflict = payload.containsKey('id') && payload['id'] != null
-        ? 'id'
-        : 'schedule_id,meeting_id';
-
+    final resolvedId = payload['id'];
     final response = await _runWithResilience<Map<String, dynamic>>(
-      () async => await _client
-          .from(_tableScheduleCustomizations)
-          .upsert(payload, onConflict: conflict)
-          .select()
-          .single(),
+      () async => resolvedId != null
+          ? await _client
+                .from(_tableScheduleCustomizations)
+                .upsert(payload, onConflict: 'id')
+                .select()
+                .single()
+          : await _client
+                .from(_tableScheduleCustomizations)
+                .insert(payload)
+                .select()
+                .single(),
       retry: false,
     );
     return ScheduleCustomizationModel.fromJson(response);

@@ -65,6 +65,20 @@ class ScheduleModel {
     );
   }
 
+  ScheduleModel copyWith({List<MeetingModel>? meetings}) {
+    return ScheduleModel(
+      id: id,
+      courseCode: courseCode,
+      courseName: courseName,
+      classGroup: classGroup,
+      room: room,
+      startTime: startTime,
+      endTime: endTime,
+      lecturerName: lecturerName,
+      meetings: meetings ?? this.meetings,
+    );
+  }
+
   Map<String, dynamic> toJson() {
     return {
       'id': id,

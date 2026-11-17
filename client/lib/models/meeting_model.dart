@@ -1,8 +1,8 @@
-import 'schedule_customization_model.dart';
-
 /// Purpose: Course meeting data model matching database schema.
 /// Data & Logic Flow: Deserializes meeting records and computes presence status with overrides.
 /// Key Components: MeetingModel
+import 'schedule_customization_model.dart';
+
 class MeetingModel {
   final int id;
   final int? scheduleId;
