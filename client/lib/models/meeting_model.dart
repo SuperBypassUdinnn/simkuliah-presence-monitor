@@ -1,3 +1,5 @@
+import 'schedule_customization_model.dart';
+
 /// Purpose: Course meeting data model matching database schema.
 /// Data & Logic Flow: Deserializes meeting records and computes presence status with overrides.
 /// Key Components: MeetingModel
@@ -17,6 +19,7 @@ class MeetingModel {
   final Map<String, dynamic>? localOverride;
   final bool isPresenceOpen;
   final DateTime? deadlineAt;
+  final ScheduleCustomizationModel? customization;
 
   const MeetingModel({
     required this.id,
@@ -34,6 +37,7 @@ class MeetingModel {
     this.localOverride,
     required this.isPresenceOpen,
     this.deadlineAt,
+    this.customization,
   });
 
   factory MeetingModel.fromJson(Map<String, dynamic> json) {
@@ -206,6 +210,44 @@ class MeetingModel {
           return word[0].toUpperCase() + word.substring(1).toLowerCase();
         })
         .join(' ');
+  }
+
+  MeetingModel copyWith({
+    int? id,
+    int? scheduleId,
+    String? courseName,
+    String? courseCode,
+    String? classGroup,
+    String? lecturerName,
+    String? room,
+    String? startTime,
+    String? endTime,
+    int? meetingNumber,
+    String? meetingDate,
+    String? simkuliahStatus,
+    Map<String, dynamic>? localOverride,
+    bool? isPresenceOpen,
+    DateTime? deadlineAt,
+    ScheduleCustomizationModel? customization,
+  }) {
+    return MeetingModel(
+      id: id ?? this.id,
+      scheduleId: scheduleId ?? this.scheduleId,
+      courseName: courseName ?? this.courseName,
+      courseCode: courseCode ?? this.courseCode,
+      classGroup: classGroup ?? this.classGroup,
+      lecturerName: lecturerName ?? this.lecturerName,
+      room: room ?? this.room,
+      startTime: startTime ?? this.startTime,
+      endTime: endTime ?? this.endTime,
+      meetingNumber: meetingNumber ?? this.meetingNumber,
+      meetingDate: meetingDate ?? this.meetingDate,
+      simkuliahStatus: simkuliahStatus ?? this.simkuliahStatus,
+      localOverride: localOverride ?? this.localOverride,
+      isPresenceOpen: isPresenceOpen ?? this.isPresenceOpen,
+      deadlineAt: deadlineAt ?? this.deadlineAt,
+      customization: customization ?? this.customization,
+    );
   }
 
   Map<String, dynamic> toJson() {

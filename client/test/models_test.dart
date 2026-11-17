@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:simkuliah_client/models/meeting_model.dart';
+import 'package:simkuliah_client/models/schedule_customization_model.dart';
 
 void main() {
   test('MeetingModel parses JSON and computes effective status correctly', () {
@@ -138,5 +139,24 @@ void main() {
     expect(meeting.deadlineAt, isNotNull);
     expect(meeting.deadlineAt!.isUtc, isFalse);
     expect(meeting.deadlineAt!.toUtc(), DateTime.utc(2026, 11, 12, 3, 31));
+  });
+
+  test('MeetingModel copyWith allows attaching ScheduleCustomizationModel', () {
+    const meeting = MeetingModel(
+      id: 50,
+      scheduleId: 10,
+      meetingNumber: 1,
+      isPresenceOpen: false,
+    );
+    const customization = ScheduleCustomizationModel(
+      scheduleId: 10,
+      meetingId: 50,
+      timeOffsetMinutes: 15,
+      autoPresenceEnabled: true,
+    );
+    final updated = meeting.copyWith(customization: customization);
+    expect(updated.customization, isNotNull);
+    expect(updated.customization?.timeOffsetMinutes, 15);
+    expect(updated.customization?.autoPresenceEnabled, isTrue);
   });
 }

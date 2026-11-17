@@ -82,7 +82,7 @@ class PresenceService {
         .map((rows) => rows.map(MeetingModel.fromJson).toList());
   }
 
-  /// Fetch today's meetings as a one-off future, sorted by start_time.
+  /// Fetch today's meetings as a one-off future, sorted by start_time, with active customizations attached.
   Future<List<MeetingModel>> fetchTodaysMeetings({
     required DateTime today,
   }) async {
@@ -96,12 +96,55 @@ class PresenceService {
     );
 
     final meetings = response.map(MeetingModel.fromJson).toList();
-    meetings.sort((a, b) {
+    final scheduleIds = meetings
+        .map((m) => m.scheduleId)
+        .whereType<int>()
+        .toSet()
+        .toList();
+
+    List<ScheduleCustomizationModel> customizations = const [];
+    if (scheduleIds.isNotEmpty) {
+      try {
+        customizations = await fetchCustomizations(scheduleIds);
+      } catch (_) {
+        // Non-fatal if offline / customizations unavailable
+      }
+    }
+
+    final mappedMeetings = meetings.map((m) {
+      final cust = _resolveEffectiveCustomization(
+        customizations,
+        m.scheduleId,
+        m.id,
+      );
+      return m.copyWith(customization: cust);
+    }).toList();
+
+    mappedMeetings.sort((a, b) {
       final cmp = a.startTime.compareTo(b.startTime);
       if (cmp != 0) return cmp;
       return a.meetingNumber.compareTo(b.meetingNumber);
     });
-    return meetings;
+    return mappedMeetings;
+  }
+
+  static ScheduleCustomizationModel? _resolveEffectiveCustomization(
+    List<ScheduleCustomizationModel> customizations,
+    int? scheduleId,
+    int? meetingId,
+  ) {
+    if (scheduleId == null) return null;
+    ScheduleCustomizationModel? courseLevel;
+    for (final c in customizations) {
+      if (c.scheduleId != scheduleId) continue;
+      if (meetingId != null && c.meetingId == meetingId) {
+        return c; // Meeting-level takes absolute precedence
+      }
+      if (c.meetingId == null && courseLevel == null) {
+        courseLevel = c;
+      }
+    }
+    return courseLevel;
   }
 
   /// Fetch the full semester schedule matrix with all nested meetings.
@@ -223,20 +266,83 @@ class PresenceService {
       () async => await _client
           .from(_tableScheduleCustomizations)
           .select('*')
-          .filter('schedule_id', 'in', scheduleIds),
+          .inFilter('schedule_id', scheduleIds),
     );
     return response.map(ScheduleCustomizationModel.fromJson).toList();
   }
 
-  /// Save or update a schedule customization row.
+  /// Save or update a schedule customization row with deterministic id conflict resolution.
   Future<ScheduleCustomizationModel> saveCustomization(
     ScheduleCustomizationModel customization,
   ) async {
     final payload = customization.toJson();
+    if (!payload.containsKey('id') || payload['id'] == null) {
+      final schedId = customization.scheduleId;
+      final meetId = customization.meetingId;
+      var query = _client
+          .from(_tableScheduleCustomizations)
+          .select('id')
+          .eq('schedule_id', schedId);
+      if (meetId == null) {
+        query = query.filter('meeting_id', 'is', 'null');
+      } else {
+        query = query.eq('meeting_id', meetId);
+      }
+      final existing = await _runWithResilience<List<Map<String, dynamic>>>(
+        () async => await query.limit(1),
+      );
+      if (existing.isNotEmpty && existing.first['id'] != null) {
+        payload['id'] = existing.first['id'];
+      }
+    }
+
+    final conflict = payload.containsKey('id') && payload['id'] != null
+        ? 'id'
+        : 'schedule_id,meeting_id';
+
     final response = await _runWithResilience<Map<String, dynamic>>(
       () async => await _client
           .from(_tableScheduleCustomizations)
-          .upsert(payload, onConflict: 'schedule_id,meeting_id')
+          .upsert(payload, onConflict: conflict)
+          .select()
+          .single(),
+      retry: false,
+    );
+    return ScheduleCustomizationModel.fromJson(response);
+  }
+
+  /// Quick 1-click toggle for auto-presence on a single meeting.
+  Future<ScheduleCustomizationModel> saveMeetingAutoPresence({
+    required int scheduleId,
+    required int meetingId,
+    required bool enabled,
+  }) async {
+    final existing = await _runWithResilience<List<Map<String, dynamic>>>(
+      () async => await _client
+          .from(_tableScheduleCustomizations)
+          .select('id')
+          .eq('schedule_id', scheduleId)
+          .eq('meeting_id', meetingId)
+          .limit(1),
+    );
+
+    final payload = <String, dynamic>{
+      'schedule_id': scheduleId,
+      'meeting_id': meetingId,
+      'auto_presence_enabled': enabled,
+    };
+    if (existing.isNotEmpty && existing.first['id'] != null) {
+      payload['id'] = existing.first['id'];
+    }
+
+    final conflict = payload.containsKey('id') && payload['id'] != null
+        ? 'id'
+        : 'schedule_id,meeting_id';
+
+    final response = await _runWithResilience<Map<String, dynamic>>(
+      () async => await _client
+          .from(_tableScheduleCustomizations)
+          .upsert(payload, onConflict: conflict)
           .select()
           .single(),
       retry: false,
