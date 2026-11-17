@@ -28,21 +28,23 @@ This feature delivers:
   - Creates `idx_schedule_customizations_course_unique` on `(schedule_id) WHERE meeting_id IS NULL`.
   - Creates `idx_schedule_customizations_meeting_unique` on `(schedule_id, meeting_id) WHERE meeting_id IS NOT NULL`.
 - [x] **Backend Deterministic Upsert (`backend/app/core/database.py`)**:
-  - `upsert_schedule_customization` resolves an existing row id before writing and targets `on_conflict: id` when one exists.
+  - `upsert_schedule_customization` resolves an existing row id before writing, then updates by primary key; a row with no match is inserted plainly, because the partial unique indexes cannot serve as an `ON CONFLICT` target.
   - `resolve_effective_customization` ignores rows whose `schedule_id` does not match the requested schedule.
-  - Covered by `backend/tests/test_database_customizations.py`.
+  - Covered by `backend/tests/test_database_customizations.py`, including the new-insert path.
 - [x] **Client Model and Service (`client/lib/`)**:
   - `MeetingModel` gained a `customization` field and `copyWith`.
-  - `PresenceService.fetchTodaysMeetings` attaches the resolved customization per meeting.
-  - `PresenceService.saveCustomization` and `saveMeetingAutoPresence` perform deterministic id resolution before upsert.
+  - `PresenceService.fetchTodaysMeetings` and `fetchSemesterMatrix` attach the resolved customization per meeting.
+  - `PresenceService.saveCustomization` and `saveMeetingAutoPresence` resolve an existing id and then update by id, or insert when the row does not exist yet.
 - [x] **Quick Toggle on Lecture Card (`client/lib/views/widgets/active_lecture_card.dart`)**:
   - Inline "Auto-Absen Pertemuan Ini" switch replaces the popup-only entry point.
   - Optimistic state update with rollback and an error notification when the write fails.
   - `TodayFeedView` and `ActivePresenceView` pass `meeting.customization`.
 - [x] **Settings Tab (`client/lib/views/settings_automation_view.dart`)**:
   - Global reminder card with 10m / 15m / 30m chips and a custom-minutes dialog.
-  - Per-course cards with auto-presence switch, offset chips (-30 to +120), and reset action.
+  - Per-course cards with an auto-presence switch, an Asli / Relatif / Pindah timing selector, relative offset chips (-30 to +120), absolute day-of-week plus start/end time pickers, a per-course reminder override, and a reset action.
   - Registered as the fourth view and navigation destination in `client/lib/main.dart`.
+- [x] **Matrix Effective Time (`client/lib/views/widgets/meeting_grid_tile.dart`)**:
+  - The detail dialog shows the effective window with the portal baseline when a customization applies.
 - [x] **Linux Runner Wake Fix (`client/linux/runner/my_application.cc`)**:
   - `my_application_activate` calls `gtk_widget_show_all` so the unmapped `FlView` child is mapped before `gtk_window_present`.
 - [x] **Version Bump**:
@@ -62,5 +64,6 @@ This feature delivers:
 
 ## 4. Follow-Up
 
-- The migration file is committed but still has to be applied to the live Supabase project (`ftznonanlbshweysliar`) through the dashboard SQL editor or the Supabase CLI, because the `exec_sql` RPC is not exposed on that project.
+- The migration was applied to the live Supabase project (`ftznonanlbshweysliar`) on 2026-11-17 through `supabase db push --remote`.
+- Live verification after the push: two consecutive course-level writes for the same schedule reused one row (offset 15 then 30, single row), and a raw duplicate insert was rejected with `23505` on `idx_schedule_customizations_course_unique`.
 - End-to-end auto-presence behavior against a live portal window remains to be observed in a real lecture session.
