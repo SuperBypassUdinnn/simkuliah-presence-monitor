@@ -1,0 +1,449 @@
+/// Purpose: Dedicated automation and settings tab for global reminders and per-course schedule configuration.
+/// Data & Logic Flow: Loads user preferences and semester schedules, allowing global reminder templates and per-course auto-presence/timing customizations.
+/// Key Components: SettingsAutomationView
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+
+import '../core/app_notification.dart';
+import '../core/error_message.dart';
+import '../core/load_epoch_guard.dart';
+import '../core/refresh_bus.dart';
+import '../models/schedule_customization_model.dart';
+import '../models/schedule_model.dart';
+import '../models/user_preferences_model.dart';
+import '../services/presence_service.dart';
+import 'widgets/error_state_view.dart';
+
+class SettingsAutomationView extends StatefulWidget {
+  final PresenceService? presenceService;
+
+  /// Optional pre-loaded state for tests / widget previews: when provided,
+  /// the async Supabase load is skipped and these values render directly.
+  final List<ScheduleModel>? initialSchedules;
+  final List<ScheduleCustomizationModel>? initialCustomizations;
+  final UserPreferencesModel? initialPreferences;
+
+  const SettingsAutomationView({
+    super.key,
+    this.presenceService,
+    this.initialSchedules,
+    this.initialCustomizations,
+    this.initialPreferences,
+  });
+
+  @override
+  State<SettingsAutomationView> createState() => _SettingsAutomationViewState();
+}
+
+class _SettingsAutomationViewState extends State<SettingsAutomationView> {
+  late final PresenceService _service;
+  final LoadEpochGuard _loadGuard = LoadEpochGuard();
+  StreamSubscription<void>? _refreshSub;
+
+  List<ScheduleModel>? _schedules;
+  List<ScheduleCustomizationModel> _customizations = const [];
+  UserPreferencesModel? _preferences;
+  bool _loading = true;
+  Object? _error;
+
+  static const List<int> _reminderTemplates = [10, 15, 30];
+
+  @override
+  void initState() {
+    super.initState();
+    _service = widget.presenceService ?? PresenceService();
+    if (widget.initialSchedules != null) {
+      _schedules = widget.initialSchedules;
+      _customizations = widget.initialCustomizations ?? const [];
+      _preferences = widget.initialPreferences;
+      _loading = false;
+      return;
+    }
+    unawaited(_load(silent: false));
+    _refreshSub = RefreshBus.instance.stream.listen((_) {
+      unawaited(_load(silent: _schedules != null, force: true));
+    });
+  }
+
+  @override
+  void dispose() {
+    unawaited(_refreshSub?.cancel());
+    super.dispose();
+  }
+
+  Future<void> _load({required bool silent, bool force = false}) async {
+    final epoch = _loadGuard.tryBegin(
+      timeout: _service.requestTimeout,
+      force: force,
+    );
+    if (epoch == null) return;
+    if (!silent || _schedules == null) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
+    try {
+      final results = await Future.wait<dynamic>([
+        _service.fetchSemesterMatrix(),
+        _service.fetchUserPreferences(),
+      ]);
+      final schedules = results[0] as List<ScheduleModel>;
+      final preferences = results[1] as UserPreferencesModel;
+
+      final scheduleIds = schedules.map((s) => s.id).toList();
+      final customizations = await _service.fetchCustomizations(scheduleIds);
+
+      if (!mounted || !_loadGuard.isCurrent(epoch)) return;
+      setState(() {
+        _schedules = schedules;
+        _customizations = customizations;
+        _preferences = preferences;
+        _loading = false;
+        _error = null;
+      });
+    } catch (error) {
+      if (!mounted || !_loadGuard.isCurrent(epoch)) return;
+      if (_schedules == null) {
+        setState(() {
+          _loading = false;
+          _error = error;
+        });
+      }
+    } finally {
+      _loadGuard.complete(epoch);
+    }
+  }
+
+  ScheduleCustomizationModel? _customizationFor(ScheduleModel schedule) {
+    for (final c in _customizations) {
+      if (c.scheduleId == schedule.id && c.meetingId == null) {
+        return c;
+      }
+    }
+    return null;
+  }
+
+  Future<void> _saveGlobalReminder(int minutes) async {
+    try {
+      final updated = (_preferences ?? UserPreferencesModel()).copyWith(
+        defaultReminderMinutes: minutes,
+      );
+      final saved = await _service.saveUserPreferences(updated);
+      if (mounted) {
+        setState(() => _preferences = saved);
+        AppNotification.show(
+          context,
+          title: 'Pengingat Global Disimpan',
+          message: 'Pengingat default masuk kuliah kini $minutes menit.',
+          color: Colors.indigo.shade600,
+          icon: Icons.notifications_active,
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        AppNotification.show(
+          context,
+          title: 'Gagal Menyimpan Pengingat',
+          message: friendlyErrorMessage(error),
+          color: Colors.red.shade600,
+          icon: Icons.error_outline,
+        );
+      }
+    }
+  }
+
+  Future<void> _saveCourseCustomization(
+    ScheduleModel schedule, {
+    bool? autoPresence,
+    int? timeOffsetMinutes,
+    int? reminderLeadMinutes,
+  }) async {
+    try {
+      final existing = _customizationFor(schedule);
+      final model =
+          (existing ?? ScheduleCustomizationModel(scheduleId: schedule.id))
+              .copyWith(
+                autoPresenceEnabled:
+                    autoPresence ?? existing?.autoPresenceEnabled ?? false,
+                timeOffsetMinutes:
+                    timeOffsetMinutes ?? existing?.timeOffsetMinutes ?? 0,
+                reminderLeadMinutes:
+                    reminderLeadMinutes ?? existing?.reminderLeadMinutes,
+              );
+      final saved = await _service.saveCustomization(model);
+      if (mounted) {
+        setState(() {
+          _customizations = [
+            ..._customizations.where(
+              (c) => c.id != saved.id || saved.id == null,
+            ),
+            saved,
+          ];
+        });
+        RefreshBus.instance.requestRefresh();
+      }
+    } catch (error) {
+      if (mounted) {
+        AppNotification.show(
+          context,
+          title: 'Gagal Menyimpan Penyesuaian',
+          message: friendlyErrorMessage(error),
+          color: Colors.red.shade600,
+          icon: Icons.error_outline,
+        );
+      }
+    }
+  }
+
+  Future<void> _resetCourseCustomization(ScheduleModel schedule) async {
+    try {
+      final existing = _customizationFor(schedule);
+      if (existing?.id != null) {
+        await _service.deleteCustomization(existing!.id!);
+      }
+      if (mounted) {
+        setState(() {
+          _customizations = _customizations
+              .where((c) => c.id != existing?.id)
+              .toList();
+        });
+        RefreshBus.instance.requestRefresh();
+        AppNotification.show(
+          context,
+          title: 'Penyesuaian Dihapus',
+          message: '${schedule.courseName} kembali ke jadwal resmi Simkuliah.',
+          color: Colors.blueGrey,
+          icon: Icons.restore,
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        AppNotification.show(
+          context,
+          title: 'Gagal Menghapus Penyesuaian',
+          message: friendlyErrorMessage(error),
+          color: Colors.red.shade600,
+          icon: Icons.error_outline,
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Pengaturan & Automasi')),
+      body: _buildBody(context),
+    );
+  }
+
+  Widget _buildBody(BuildContext context) {
+    if (_loading && _schedules == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_error != null && _schedules == null) {
+      return ErrorStateView(
+        title: 'Gagal memuat pengaturan',
+        error: _error,
+        onRetry: () => unawaited(_load(silent: false, force: true)),
+      );
+    }
+
+    final schedules = _schedules ?? const <ScheduleModel>[];
+    return RefreshIndicator(
+      onRefresh: () => _load(silent: true, force: true),
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(16),
+        children: [
+          _buildGlobalReminderCard(context),
+          const SizedBox(height: 16),
+          Text(
+            'Penyesuaian Mata Kuliah',
+            style: Theme.of(context).textTheme.titleMedium
+                ?.copyWith(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          if (schedules.isEmpty)
+            const Padding(
+              padding: EdgeInsets.all(24),
+              child: Center(
+                child: Text(
+                  'Belum ada mata kuliah terdaftar semester ini.',
+                  style: TextStyle(color: Colors.grey),
+                ),
+              ),
+            )
+          else
+            ...schedules.map((s) => _buildCourseCard(context, s)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGlobalReminderCard(BuildContext context) {
+    final current = _preferences?.defaultReminderMinutes ?? 15;
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.notifications_active,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    'Pengingat Masuk Kuliah (Global)',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Notifikasi pengingat dikirim $current menit sebelum kuliah dimulai.',
+              style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                ..._reminderTemplates.map(
+                  (m) => ChoiceChip(
+                    label: Text('${m}m'),
+                    selected: current == m,
+                    onSelected: (_) => unawaited(_saveGlobalReminder(m)),
+                  ),
+                ),
+                ActionChip(
+                  label: Text('Kustom (${current}m)'),
+                  avatar: const Icon(Icons.edit, size: 16),
+                  onPressed: () =>
+                      unawaited(_showCustomReminderDialog(current)),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showCustomReminderDialog(int current) async {
+    final controller = TextEditingController(text: current.toString());
+    final result = await showDialog<int>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Pengingat Kustom (Menit)'),
+        content: TextField(
+          controller: controller,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            border: OutlineInputBorder(),
+            suffixText: 'menit',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Batal'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final parsed = int.tryParse(controller.text);
+              Navigator.of(dialogContext).pop(parsed);
+            },
+            child: const Text('Simpan'),
+          ),
+        ],
+      ),
+    );
+    if (result != null && result > 0) {
+      await _saveGlobalReminder(result);
+    }
+  }
+
+  Widget _buildCourseCard(BuildContext context, ScheduleModel schedule) {
+    final cust = _customizationFor(schedule);
+    final autoPresence = cust?.autoPresenceEnabled ?? false;
+    final offset = cust?.timeOffsetMinutes ?? 0;
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      elevation: 1,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              schedule.courseName,
+              style: Theme.of(context).textTheme.titleMedium
+                  ?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              '${schedule.courseCode} · Kelas ${schedule.classGroup} · ${schedule.startTime} - ${schedule.endTime} WIB',
+              style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+            ),
+            const SizedBox(height: 12),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              title: const Text(
+                'Presensi Otomatis (Semua Pertemuan)',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              subtitle: const Text(
+                'Konfirmasi kehadiran otomatis saat dosen membuka presensi.',
+                style: TextStyle(fontSize: 12),
+              ),
+              value: autoPresence,
+              onChanged: (val) => unawaited(
+                _saveCourseCustomization(schedule, autoPresence: val),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                const Text('Offset: ', style: TextStyle(fontSize: 13)),
+                for (final o in const [-30, -15, 0, 15, 30, 60, 120])
+                  ChoiceChip(
+                    label: Text(o == 0 ? 'Asli' : '${o > 0 ? '+' : ''}${o}m'),
+                    selected: offset == o,
+                    onSelected: (_) => unawaited(
+                      _saveCourseCustomization(schedule, timeOffsetMinutes: o),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                icon: const Icon(Icons.restore, size: 16),
+                label: const Text('Reset Jadwal Asli'),
+                onPressed: cust == null
+                    ? null
+                    : () => unawaited(_resetCourseCustomization(schedule)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
