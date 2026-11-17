@@ -42,7 +42,32 @@ void main() {
     expect(find.textContaining('Portal: 08:00'), findsOneWidget);
     // Effective time should reflect +60m = 09:00 - 10:40
     expect(find.textContaining('09:00 - 10:40'), findsOneWidget);
-    // Auto-presence badge should be visible
-    expect(find.text('Auto-Absen'), findsOneWidget);
+    // Auto-presence toggle should be visible
+    expect(find.text('Auto-Absen Pertemuan Ini'), findsOneWidget);
+  });
+
+  testWidgets('renders auto-absen toggle and reflects state', (tester) async {
+    const meeting = MeetingModel(
+      id: 10,
+      scheduleId: 1,
+      courseName: 'Grafika Komputer',
+      courseCode: 'INF201',
+      startTime: '08:00:00',
+      endTime: '09:40:00',
+      meetingNumber: 1,
+      isPresenceOpen: false,
+    );
+
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(body: ActiveLectureCard(meeting: meeting)),
+      ),
+    );
+
+    expect(find.text('Auto-Absen Pertemuan Ini'), findsOneWidget);
+    final switchFinder = find.byType(Switch);
+    expect(switchFinder, findsOneWidget);
+    final switchWidget = tester.widget<Switch>(switchFinder);
+    expect(switchWidget.value, isFalse);
   });
 }

@@ -216,6 +216,7 @@ class _TodayFeedViewState extends State<TodayFeedView> {
             padding: const EdgeInsets.only(bottom: 14),
             child: ActiveLectureCard(
               meeting: meeting,
+              customization: meeting.customization,
               presenceService: _service,
               onStatusChanged: () =>
                   unawaited(_load(silent: true, force: true)),
