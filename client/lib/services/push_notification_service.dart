@@ -74,12 +74,18 @@ class FcmActionEncoder {
         .where((entry) => entry.label.isNotEmpty && entry.token.isNotEmpty)
         .map(
           (entry) => AndroidNotificationAction(
-            '${entry.action}|${entry.token}',
+            encodeActionId(action: entry.action, token: entry.token),
             entry.label,
           ),
         )
         .toList();
   }
+
+  /// Combine an action and token into an action id string (`action|token`).
+  static String encodeActionId({
+    required String action,
+    required String token,
+  }) => '$action|$token';
 
   /// Split an action id (`action|token`) into its parts, or null.
   static ({String action, String token})? decodeActionId(String? actionId) {
@@ -113,10 +119,34 @@ Future<void> handleNotificationActionTap(NotificationResponse response) async {
   if (decoded == null) {
     return;
   }
-  await DeviceService().submitActionToken(
-    action: decoded.action,
-    token: decoded.token,
-  );
+  try {
+    final ok = await DeviceService().submitActionToken(
+      action: decoded.action,
+      token: decoded.token,
+    );
+    if (ok && response.id != null) {
+      final plugin = FlutterLocalNotificationsPlugin();
+      await plugin.show(
+        id: response.id!,
+        title: 'Presensi Berhasil',
+        body: 'Aksi presensi telah berhasil dikonfirmasi.',
+        notificationDetails: const NotificationDetails(
+          android: AndroidNotificationDetails(
+            'presensi_general',
+            'Presensi',
+            channelDescription: 'Informasi jadwal dan status presensi',
+            importance: Importance.defaultImportance,
+            priority: Priority.defaultPriority,
+            autoCancel: true,
+          ),
+        ),
+      );
+      await Future<void>.delayed(const Duration(seconds: 3));
+      await plugin.cancel(id: response.id!);
+    }
+  } catch (error) {
+    debugPrint('handleNotificationActionTap failed: $error');
+  }
 }
 
 /// Sets up Firebase Cloud Messaging for the running platform.

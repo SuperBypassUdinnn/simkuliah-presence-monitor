@@ -12,8 +12,11 @@ from app.services.state_machine import NotificationLevel
 # Notification titles per state. A course label is appended so two
 # simultaneous classes are distinguishable in the notification shade.
 STATE_TITLES = {
+    NotificationLevel.CLASS_REMINDER: "Pengingat Kuliah",
     NotificationLevel.CLASS_STARTED: "Kelas Dimulai",
     NotificationLevel.LECTURER_OPENED: "Presensi Dibuka",
+    NotificationLevel.AUTO_CONFIRMED: "Presensi Otomatis Berhasil",
+    NotificationLevel.AUTO_PRESENCE_FAILED: "Presensi Otomatis Gagal",
     NotificationLevel.PENDING_REMINDER: "Pengingat Presensi",
     NotificationLevel.URGENT_CLOSING: "Presensi Segera Ditutup",
     NotificationLevel.WINDOW_EXPIRED: "Presensi Ditutup",
@@ -25,6 +28,7 @@ STATE_TITLES = {
 ACTIONABLE_STATES = frozenset(
     {
         NotificationLevel.LECTURER_OPENED,
+        NotificationLevel.AUTO_PRESENCE_FAILED,
         NotificationLevel.PENDING_REMINDER,
         NotificationLevel.URGENT_CLOSING,
     }
@@ -56,9 +60,17 @@ def notification_text(state: NotificationLevel, context: dict) -> str:
     where = f" di {room}" if room else ""
     who = f" - {lecturer}" if lecturer else ""
     base = f"{label}{where}{who}"
+    lead = context.get("lead_minutes") or context.get("reminder_lead_minutes")
+    lead_str = f" dalam {lead} menit" if lead else ""
+    meeting_no = context.get("meeting_no")
+    meeting_str = f" pertemuan ke-{meeting_no}" if meeting_no else ""
+
     texts = {
+        NotificationLevel.CLASS_REMINDER: f"Kuliah dimulai{lead_str}: {base}.",
         NotificationLevel.CLASS_STARTED: f"Kelas dimulai: {base}.",
         NotificationLevel.LECTURER_OPENED: f"Dosen telah buka presensi: {base}.",
+        NotificationLevel.AUTO_CONFIRMED: f"Presensi{meeting_str} telah otomatis dikonfirmasi hadir: {base}.",
+        NotificationLevel.AUTO_PRESENCE_FAILED: f"Presensi otomatis ke Simkuliah gagal. Segera lakukan presensi manual: {base}.",
         NotificationLevel.PENDING_REMINDER: f"Pengingat: segera konfirmasi presensi {base}.",
         NotificationLevel.URGENT_CLOSING: f"Presensi hampir tutup: {base}.",
         NotificationLevel.WINDOW_EXPIRED: f"Jendela presensi telah tutup: {base}.",

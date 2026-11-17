@@ -54,11 +54,13 @@ def resolve_env_file(env_file: str | None = None) -> str:
             so a misconfigured deployment fails fast instead of silently
             starting without credentials.
     """
-    for candidate in dotenv_candidates(env_file):
+    if env_file:
+        if os.path.isfile(env_file):
+            return env_file
+        raise FileNotFoundError(f"ENV_FILE points to a missing file: {env_file}")
+    for candidate in dotenv_candidates():
         if os.path.isfile(candidate):
             return candidate
-    if env_file:
-        raise FileNotFoundError(f"ENV_FILE points to a missing file: {env_file}")
     return _LOCAL_ENV_FILE
 
 

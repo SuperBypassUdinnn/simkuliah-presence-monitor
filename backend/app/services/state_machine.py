@@ -14,10 +14,13 @@ from enum import StrEnum
 
 
 class NotificationLevel(StrEnum):
-    """The five notification tiers, in escalation order."""
+    """The notification tiers, in escalation order."""
 
+    CLASS_REMINDER = "class_reminder"
     CLASS_STARTED = "class_started"
     LECTURER_OPENED = "lecturer_opened"
+    AUTO_CONFIRMED = "auto_confirmed"
+    AUTO_PRESENCE_FAILED = "auto_presence_failed"
     PENDING_REMINDER = "pending_reminder"
     URGENT_CLOSING = "urgent_closing"
     WINDOW_EXPIRED = "window_expired"
@@ -33,20 +36,26 @@ class Priority(StrEnum):
 # Backwards-compatible alias required by the task interface.
 NotificationState = NotificationLevel
 
-# Module-level constant aliases for the five levels.
+# Module-level constant aliases for the levels.
+CLASS_REMINDER = NotificationLevel.CLASS_REMINDER
 CLASS_STARTED = NotificationLevel.CLASS_STARTED
 LECTURER_OPENED = NotificationLevel.LECTURER_OPENED
+AUTO_CONFIRMED = NotificationLevel.AUTO_CONFIRMED
+AUTO_PRESENCE_FAILED = NotificationLevel.AUTO_PRESENCE_FAILED
 PENDING_REMINDER = NotificationLevel.PENDING_REMINDER
 URGENT_CLOSING = NotificationLevel.URGENT_CLOSING
 WINDOW_EXPIRED = NotificationLevel.WINDOW_EXPIRED
 
 # Ordinal rank of each level, used for monotonic (non-regressing) progression.
 _LEVEL_RANK: dict[NotificationLevel, int] = {
-    NotificationLevel.CLASS_STARTED: 0,
-    NotificationLevel.LECTURER_OPENED: 1,
-    NotificationLevel.PENDING_REMINDER: 2,
-    NotificationLevel.URGENT_CLOSING: 3,
-    NotificationLevel.WINDOW_EXPIRED: 4,
+    NotificationLevel.CLASS_REMINDER: 0,
+    NotificationLevel.CLASS_STARTED: 1,
+    NotificationLevel.LECTURER_OPENED: 2,
+    NotificationLevel.AUTO_CONFIRMED: 2,
+    NotificationLevel.AUTO_PRESENCE_FAILED: 2,
+    NotificationLevel.PENDING_REMINDER: 3,
+    NotificationLevel.URGENT_CLOSING: 4,
+    NotificationLevel.WINDOW_EXPIRED: 5,
 }
 
 # --------------------------------------------------------------------------- #
@@ -59,11 +68,15 @@ _URGENT_WINDOW_MINUTES = 10
 # How close to the presence deadline before PENDING_REMINDER is raised.
 _PENDING_WINDOW_MINUTES = 15
 
-# Only these two levels escalate to high priority: the lecturer opening
-# presence, and the final minutes before the window closes. Every other
-# level stays normal (product decision, plan 04).
+# Only high-priority levels escalate: the lecturer opening presence,
+# failed auto-presence requiring immediate manual action, and the final
+# minutes before the window closes. Every other level stays normal.
 _HIGH_PRIORITY_LEVELS = frozenset(
-    {NotificationLevel.LECTURER_OPENED, NotificationLevel.URGENT_CLOSING}
+    {
+        NotificationLevel.LECTURER_OPENED,
+        NotificationLevel.URGENT_CLOSING,
+        NotificationLevel.AUTO_PRESENCE_FAILED,
+    }
 )
 
 
@@ -106,11 +119,13 @@ def evaluate_notification_state(
     last_notified_level: NotificationLevel | None,
     lecturer_opened_at: datetime | None = None,
     deadline_at: datetime | None = None,
+    reminder_lead_minutes: int | None = None,
 ) -> NotificationLevel | None:
     """Evaluate the current notification level for a meeting.
 
     Returns ``None`` when notifications are suppressed (active override or
-    student already present) or when the class has not started yet.
+    student already present) or when the class has not started yet (unless
+    within the advance reminder lead window).
     Otherwise returns the highest applicable :class:`NotificationLevel`,
     never regressing below ``last_notified_level``.
 
@@ -124,6 +139,7 @@ def evaluate_notification_state(
         last_notified_level: The last level that was actually dispatched.
         lecturer_opened_at: When the lecturer opened presence (informational).
         deadline_at: The presence deadline (informational).
+        reminder_lead_minutes: Advance notice in minutes before class start.
     """
     del lecturer_opened_at  # accepted for interface completeness; open state
     # is derived from is_dosen_open.
@@ -135,6 +151,13 @@ def evaluate_notification_state(
     # Class has not started yet.
     start_dt = _combine(now.date(), start_time)
     if now < start_dt:
+        if reminder_lead_minutes is not None and reminder_lead_minutes > 0:
+            reminder_dt = start_dt - _minutes(reminder_lead_minutes)
+            if now >= reminder_dt:
+                candidate = NotificationLevel.CLASS_REMINDER
+                if _rank(last_notified_level) > _rank(candidate):
+                    return last_notified_level
+                return candidate
         return None
 
     end_dt = _combine(now.date(), end_time)
