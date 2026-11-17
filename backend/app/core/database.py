@@ -542,12 +542,33 @@ class DatabaseRepository:
         return await self._with_retry(operation, "get_schedule_customizations")
 
     async def upsert_schedule_customization(self, customization: dict[str, Any]) -> dict[str, Any]:
-        """Insert or update a schedule customization on ``(schedule_id, meeting_id)``."""
+        """Insert or update a schedule customization deterministically."""
 
         def operation() -> Any:
+            payload = dict(customization)
+            sched_id = payload.get("schedule_id")
+            meeting_id = payload.get("meeting_id")
+            existing_id = payload.get("id")
+
+            if existing_id is None and sched_id is not None:
+                query = (
+                    self.client.table(_TABLE_SCHEDULE_CUSTOMIZATIONS)
+                    .select("id")
+                    .eq("schedule_id", sched_id)
+                )
+                if meeting_id is None:
+                    query = query.is_("meeting_id", "null")
+                else:
+                    query = query.eq("meeting_id", meeting_id)
+                found = query.limit(1).execute()
+                if found.data:
+                    existing_id = found.data[0].get("id")
+                    payload["id"] = existing_id
+
+            conflict_target = "id" if existing_id is not None else "schedule_id,meeting_id"
             response = (
                 self.client.table(_TABLE_SCHEDULE_CUSTOMIZATIONS)
-                .upsert(customization, on_conflict="schedule_id,meeting_id")
+                .upsert(payload, on_conflict=conflict_target)
                 .execute()
             )
             data = response.data or []
@@ -587,6 +608,8 @@ class DatabaseRepository:
 
         best: dict[str, Any] | None = None
         for row in rows:
+            if row.get("schedule_id") != schedule_id:
+                continue
             row_meeting_id = row.get("meeting_id")
             if meeting_id is not None and row_meeting_id == meeting_id:
                 return row
