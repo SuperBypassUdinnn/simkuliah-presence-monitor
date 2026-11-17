@@ -40,6 +40,12 @@ class ActiveLectureCard extends StatefulWidget {
 }
 
 class _ActiveLectureCardState extends State<ActiveLectureCard> {
+  /// Upper bound for the card's inline controls. Without it the auto-absen row
+  /// and the presence button stretch across the whole card, which turns them
+  /// into screen-wide controls in a desktop window. Mobile widths stay
+  /// full-width because the constraint never widens a narrow layout.
+  static const double _controlMaxWidth = 420;
+
   late PresenceService _service;
   String? _activeOverride;
   bool _submitting = false;
@@ -362,6 +368,35 @@ class _ActiveLectureCardState extends State<ActiveLectureCard> {
     final match = RegExp(r'(\d{2})[:.](\d{2})').firstMatch(time);
     if (match == null) return time;
     return '${match.group(1)}:${match.group(2)}';
+  }
+
+  /// Explains the auto-absen state without overstating what the user must do.
+  ///
+  /// A switched-off toggle has several distinct causes (attendance already
+  /// recorded, presence window closed, lecture finished), so the subtitle
+  /// names the real one. The reasons that make automation impossible are
+  /// checked first, which also keeps a stale "on" flag from promising
+  /// automation that can no longer fire.
+  String _autoPresenceSubtitle() {
+    final meeting = widget.meeting;
+    if (meeting.isAttended) {
+      return 'Tidak diperlukan: presensi sudah tercatat di Simkuliah';
+    }
+    final deadline = meeting.deadlineAt;
+    if (deadline != null && !deadline.isAfter(DateTime.now())) {
+      return 'Tidak berlaku: jendela presensi sudah ditutup';
+    }
+    if (meeting.isPastScheduleTime()) {
+      return 'Tidak berlaku: jadwal kuliah sudah berakhir';
+    }
+    if (_autoPresence) {
+      return 'Aktif: otomatis absen saat dosen membuka presensi';
+    }
+    if (meeting.isPresenceOpen) {
+      return 'Nonaktif: presensi sedang dibuka, lakukan manual';
+    }
+    return 'Nonaktif: aktifkan agar presensi otomatis saat dosen membuka '
+        'absensi';
   }
 
   Widget _buildStatusBanner(BuildContext context) {
@@ -729,61 +764,72 @@ class _ActiveLectureCardState extends State<ActiveLectureCard> {
             const SizedBox(height: 14),
             _buildStatusBanner(context),
             const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-              decoration: BoxDecoration(
-                color: _autoPresence
-                    ? Colors.amber.withValues(alpha: 0.12)
-                    : Colors.grey.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: _autoPresence
-                      ? Colors.amber.shade400
-                      : Colors.grey.shade300,
-                  width: 0.8,
-                ),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.bolt,
-                    size: 20,
-                    color: _autoPresence ? Colors.amber.shade800 : Colors.grey,
+            Align(
+              alignment: Alignment.centerLeft,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: _controlMaxWidth),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 4,
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Auto-Absen Pertemuan Ini',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: _autoPresence
-                                ? FontWeight.bold
-                                : FontWeight.normal,
-                            color: _autoPresence ? Colors.amber.shade900 : null,
-                          ),
-                        ),
-                        Text(
-                          _autoPresence
-                              ? 'Aktif: otomatis absen saat dosen buka presensi'
-                              : 'Nonaktif: lakukan presensi manual',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Colors.grey.shade600,
-                          ),
-                        ),
-                      ],
+                  decoration: BoxDecoration(
+                    color: _autoPresence
+                        ? Colors.amber.withValues(alpha: 0.12)
+                        : Colors.grey.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: _autoPresence
+                          ? Colors.amber.shade400
+                          : Colors.grey.shade300,
+                      width: 0.8,
                     ),
                   ),
-                  Switch(
-                    value: _autoPresence,
-                    onChanged: widget.meeting.isAttended
-                        ? null
-                        : _handleToggleAutoPresence,
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.bolt,
+                        size: 20,
+                        color: _autoPresence
+                            ? Colors.amber.shade800
+                            : Colors.grey,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Auto-Absen Pertemuan Ini',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: _autoPresence
+                                    ? FontWeight.bold
+                                    : FontWeight.normal,
+                                color: _autoPresence
+                                    ? Colors.amber.shade900
+                                    : null,
+                              ),
+                            ),
+                            Text(
+                              _autoPresenceSubtitle(),
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey.shade600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Switch(
+                        value: _autoPresence,
+                        onChanged: widget.meeting.isAttended
+                            ? null
+                            : _handleToggleAutoPresence,
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
             ),
             if (canPerformPresence) ...[
@@ -798,28 +844,34 @@ class _ActiveLectureCardState extends State<ActiveLectureCard> {
                 ],
               ),
               const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  icon: _submitting
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : const Icon(Icons.touch_app),
-                  onPressed: _submitting ? null : _handleConfirmPresence,
-                  label: Text(
-                    _submitting
-                        ? 'Sedang Memverifikasi...'
-                        : 'Lakukan Presensi',
-                  ),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: Colors.green.shade600,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: _controlMaxWidth),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      icon: _submitting
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(Icons.touch_app),
+                      onPressed: _submitting ? null : _handleConfirmPresence,
+                      label: Text(
+                        _submitting
+                            ? 'Sedang Memverifikasi...'
+                            : 'Lakukan Presensi',
+                      ),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: Colors.green.shade600,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                    ),
                   ),
                 ),
               ),
