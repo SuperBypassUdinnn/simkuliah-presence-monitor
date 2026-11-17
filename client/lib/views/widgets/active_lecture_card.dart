@@ -7,8 +7,10 @@ import '../../core/app_notification.dart';
 import '../../core/error_message.dart';
 import '../../core/override_style.dart';
 import '../../models/meeting_model.dart';
+import '../../models/schedule_customization_model.dart';
 import '../../services/presence_service.dart';
 import 'countdown_timer.dart';
+import 'schedule_customization_dialog.dart';
 
 /// A Material 3 card for a single lecture meeting in today's feed or active presence.
 ///
@@ -16,8 +18,10 @@ import 'countdown_timer.dart';
 /// Supports presence confirmation (strictly when allowed) and local overrides (Izin / Sakit / Alpa).
 class ActiveLectureCard extends StatefulWidget {
   final MeetingModel meeting;
+  final ScheduleCustomizationModel? customization;
   final PresenceService? presenceService;
   final VoidCallback? onStatusChanged;
+  final ValueChanged<ScheduleCustomizationModel?>? onCustomizationChanged;
 
   /// Whether presence confirmation action is enabled (strictly true only in Presensi Aktif tab).
   final bool allowPresenceConfirmation;
@@ -25,8 +29,10 @@ class ActiveLectureCard extends StatefulWidget {
   const ActiveLectureCard({
     super.key,
     required this.meeting,
+    this.customization,
     this.presenceService,
     this.onStatusChanged,
+    this.onCustomizationChanged,
     this.allowPresenceConfirmation = false,
   });
 
@@ -264,6 +270,60 @@ class _ActiveLectureCardState extends State<ActiveLectureCard> {
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
+  }
+
+  String _getEffectiveTimeText() {
+    final cust = widget.customization;
+    if (cust == null) {
+      return '${widget.meeting.startTimeShort} - ${widget.meeting.endTimeShort} WIB';
+    }
+
+    if (cust.customStartTime != null && cust.customEndTime != null) {
+      final start = _stripSeconds(cust.customStartTime!);
+      final end = _stripSeconds(cust.customEndTime!);
+      return '$start - $end WIB';
+    }
+
+    if (cust.timeOffsetMinutes != 0 &&
+        widget.meeting.startTime.isNotEmpty &&
+        widget.meeting.endTime.isNotEmpty) {
+      final startParsed = _parseTime(widget.meeting.startTime);
+      final endParsed = _parseTime(widget.meeting.endTime);
+      if (startParsed != null && endParsed != null) {
+        final shiftedStart = startParsed.add(
+          Duration(minutes: cust.timeOffsetMinutes),
+        );
+        final shiftedEnd = endParsed.add(
+          Duration(minutes: cust.timeOffsetMinutes),
+        );
+        final sh = shiftedStart.hour.toString().padLeft(2, '0');
+        final sm = shiftedStart.minute.toString().padLeft(2, '0');
+        final eh = shiftedEnd.hour.toString().padLeft(2, '0');
+        final em = shiftedEnd.minute.toString().padLeft(2, '0');
+        return '$sh:$sm - $eh:$em WIB';
+      }
+    }
+
+    return '${widget.meeting.startTimeShort} - ${widget.meeting.endTimeShort} WIB';
+  }
+
+  static DateTime? _parseTime(String time) {
+    final match = RegExp(r'(\d{2})[:.](\d{2})').firstMatch(time);
+    if (match == null) return null;
+    final now = DateTime.now();
+    return DateTime(
+      now.year,
+      now.month,
+      now.day,
+      int.parse(match.group(1)!),
+      int.parse(match.group(2)!),
+    );
+  }
+
+  static String _stripSeconds(String time) {
+    final match = RegExp(r'(\d{2})[:.](\d{2})').firstMatch(time);
+    if (match == null) return time;
+    return '${match.group(1)}:${match.group(2)}';
   }
 
   Widget _buildStatusBanner(BuildContext context) {
@@ -511,6 +571,28 @@ class _ActiveLectureCardState extends State<ActiveLectureCard> {
                     ],
                   ),
                 ),
+                IconButton(
+                  icon: const Icon(Icons.tune, size: 20),
+                  tooltip: 'Sesuaikan Jadwal & Automasi',
+                  onPressed: () {
+                    showDialog(
+                      context: context,
+                      builder: (_) => ScheduleCustomizationDialog(
+                        courseName: widget.meeting.courseName,
+                        courseCode: widget.meeting.courseCode,
+                        scheduleId: widget.meeting.scheduleId ?? 0,
+                        meetingId: widget.meeting.id,
+                        meetingNumber: widget.meeting.meetingNumber,
+                        initialCustomization: widget.customization,
+                        presenceService: _service,
+                        onSaved: (saved) {
+                          widget.onCustomizationChanged?.call(saved);
+                          widget.onStatusChanged?.call();
+                        },
+                      ),
+                    );
+                  },
+                ),
               ],
             ),
             const SizedBox(height: 12),
@@ -529,9 +611,69 @@ class _ActiveLectureCardState extends State<ActiveLectureCard> {
                       ),
                       const SizedBox(width: 4),
                       Text(
-                        '${widget.meeting.startTimeShort} - ${widget.meeting.endTimeShort} WIB',
+                        _getEffectiveTimeText(),
                         style: Theme.of(context).textTheme.bodyMedium,
                       ),
+                      if (widget.customization != null &&
+                          (widget.customization!.timeOffsetMinutes != 0 ||
+                              widget.customization!.customStartTime !=
+                                  null)) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.grey.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            '(Portal: ${widget.meeting.startTimeShort})',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey,
+                            ),
+                          ),
+                        ),
+                      ],
+                      if (widget.customization?.autoPresenceEnabled ==
+                          true) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.amber.withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(
+                              color: Colors.amber.shade700,
+                              width: 0.8,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.bolt,
+                                size: 12,
+                                color: Colors.amber.shade800,
+                              ),
+                              const SizedBox(width: 2),
+                              Text(
+                                'Auto-Absen',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.amber.shade900,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 if (widget.meeting.room.isNotEmpty)
