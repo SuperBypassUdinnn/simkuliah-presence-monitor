@@ -546,7 +546,12 @@ class _MainHomeScreenState extends State<MainHomeScreen>
       );
     }
 
-    // Fallback bottom navigation on narrow mobile screen
+    // Fallback bottom navigation on narrow mobile screen.
+    //
+    // Labels stay one word each: a two-line label such as "Matriks Semester"
+    // raises the label block above the icon, so the icon drifts upward and
+    // the text no longer sits centered under it. The full tab titles remain
+    // visible in each view's AppBar, and the desktop sidebar keeps them too.
     return Scaffold(
       body: IndexedStack(index: _currentIndex, children: _views),
       bottomNavigationBar: NavigationBar(
@@ -556,17 +561,17 @@ class _MainHomeScreenState extends State<MainHomeScreen>
           NavigationDestination(
             icon: Icon(Icons.timer_outlined),
             selectedIcon: Icon(Icons.timer),
-            label: 'Presensi Aktif',
+            label: 'Presensi',
           ),
           NavigationDestination(
             icon: Icon(Icons.calendar_today_outlined),
             selectedIcon: Icon(Icons.calendar_today),
-            label: 'Jadwal Hari Ini',
+            label: 'Jadwal',
           ),
           NavigationDestination(
             icon: Icon(Icons.table_chart_outlined),
             selectedIcon: Icon(Icons.table_chart),
-            label: 'Matriks Semester',
+            label: 'Matriks',
           ),
           NavigationDestination(
             icon: Icon(Icons.tune_outlined),

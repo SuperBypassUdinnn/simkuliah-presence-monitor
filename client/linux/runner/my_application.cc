@@ -8,13 +8,18 @@
 #include "flutter/generated_plugin_registrant.h"
 
 // Purpose: GTK application runner for the Linux desktop build.
-// Data & Logic Flow: Creates the single application window hosting the Flutter view; second launches forward activation to the running instance and re-present its window (tray-hidden included).
+// Data & Logic Flow: Creates the single application window hosting the Flutter view; second launches forward activation to the running instance and re-present its window (tray-hidden included), and every re-map of a previously hidden window forces a fresh Flutter frame.
 // Key Components: MyApplication (unique GApplication, single window)
 
 struct _MyApplication {
   GtkApplication parent_instance;
   char** dart_entrypoint_arguments;
   GtkWindow* first_window;
+  // Window re-map bookkeeping; see window_map_cb.
+  gboolean window_mapped_before;
+  guint restore_size_source;
+  gint restore_width;
+  gint restore_height;
 };
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
@@ -47,6 +52,55 @@ static void window_destroy_cb(GtkWidget* widget, MyApplication* self) {
   self->first_window = nullptr;
 }
 
+// Restores the window size captured before window_map_cb's one-pixel nudge.
+static gboolean restore_window_size_cb(gpointer user_data) {
+  MyApplication* self = MY_APPLICATION(user_data);
+  self->restore_size_source = 0;
+  if (self->first_window == nullptr) {
+    return G_SOURCE_REMOVE;
+  }
+  gtk_window_resize(self->first_window, self->restore_width,
+                    self->restore_height);
+  return G_SOURCE_REMOVE;
+}
+
+// Forces the Flutter embedder to produce a frame after the window is mapped
+// again.
+//
+// Hiding to the tray unmaps the window; showing it again at the same size
+// leaves the Flutter view with no configure event, so the embedder never
+// receives a new frame target and the window presents an empty (black)
+// surface. Nothing is repainted until the user happens to resize the window.
+// A one-pixel resize generates that configure event, and the size is restored
+// in a later main-loop iteration because GTK coalesces resizes issued in the
+// same iteration into a no-op. The first map is skipped: the window is
+// allocated from scratch there, which already produces a configure event.
+static void window_map_cb(GtkWidget* widget, MyApplication* self) {
+  if (!self->window_mapped_before) {
+    self->window_mapped_before = TRUE;
+    return;
+  }
+
+  if (self->restore_size_source != 0) {
+    // A second map inside the same 16 ms window restarts the restore timer
+    // but keeps the size captured on the first map, so repeated maps can
+    // never walk the height upward one pixel per map.
+    g_source_remove(self->restore_size_source);
+    self->restore_size_source = g_timeout_add(16, restore_window_size_cb, self);
+    return;
+  }
+
+  gtk_window_get_size(GTK_WINDOW(widget), &self->restore_width,
+                      &self->restore_height);
+  if (self->restore_width <= 0 || self->restore_height <= 0) {
+    return;
+  }
+
+  gtk_window_resize(GTK_WINDOW(widget), self->restore_width,
+                    self->restore_height + 1);
+  self->restore_size_source = g_timeout_add(16, restore_window_size_cb, self);
+}
+
 // Implements GApplication::activate.
 static void my_application_activate(GApplication* application) {
   MyApplication* self = MY_APPLICATION(application);
@@ -55,8 +109,10 @@ static void my_application_activate(GApplication* application) {
   // forwards "activate" to the running instance (possibly hidden in the
   // tray); re-show the existing window instead of creating another Flutter
   // view. Recursively show all children (FlView) so windows waking from
-  // --hidden autostart are fully mapped and rendered.
+  // --hidden autostart are fully mapped; window_map_cb then re-renders the
+  // embedder when the window was previously hidden.
   if (self->first_window != nullptr) {
+    gtk_window_deiconify(self->first_window);
     gtk_widget_show_all(GTK_WIDGET(self->first_window));
     gtk_window_present(self->first_window);
     return;
@@ -66,6 +122,7 @@ static void my_application_activate(GApplication* application) {
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
   self->first_window = window;
   g_signal_connect(window, "destroy", G_CALLBACK(window_destroy_cb), self);
+  g_signal_connect(window, "map", G_CALLBACK(window_map_cb), self);
 
   // Use a header bar when running in GNOME as this is the common style used
   // by applications and is the setup most users will be using (e.g. Ubuntu
@@ -166,6 +223,10 @@ static void my_application_shutdown(GApplication* application) {
 // Implements GObject::dispose.
 static void my_application_dispose(GObject* object) {
   MyApplication* self = MY_APPLICATION(object);
+  if (self->restore_size_source != 0) {
+    g_source_remove(self->restore_size_source);
+    self->restore_size_source = 0;
+  }
   g_clear_pointer(&self->dart_entrypoint_arguments, g_strfreev);
   G_OBJECT_CLASS(my_application_parent_class)->dispose(object);
 }
@@ -181,6 +242,10 @@ static void my_application_class_init(MyApplicationClass* klass) {
 
 static void my_application_init(MyApplication* self) {
   self->first_window = nullptr;
+  self->window_mapped_before = FALSE;
+  self->restore_size_source = 0;
+  self->restore_width = 0;
+  self->restore_height = 0;
 }
 
 MyApplication* my_application_new() {
