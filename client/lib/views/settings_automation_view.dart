@@ -446,6 +446,9 @@ class _SettingsAutomationViewState extends State<SettingsAutomationView> {
       ),
       _TimingMode.relative => _saveCourseCustomization(
         schedule,
+        timeOffsetMinutes: (cust != null && cust.timeOffsetMinutes != 0)
+            ? cust.timeOffsetMinutes
+            : 15,
         clearAbsolute: true,
       ),
       _TimingMode.absolute => _saveCourseCustomization(
@@ -566,9 +569,9 @@ class _SettingsAutomationViewState extends State<SettingsAutomationView> {
                 spacing: 6,
                 runSpacing: 6,
                 children: [
-                  for (final o in const [-30, -15, 0, 15, 30, 60, 120])
+                  for (final o in const [-30, -15, 15, 30, 60, 120])
                     ChoiceChip(
-                      label: Text(o == 0 ? '0m' : '${o > 0 ? '+' : ''}${o}m'),
+                      label: Text('${o > 0 ? '+' : ''}${o}m'),
                       selected: offset == o,
                       onSelected: (_) => unawaited(
                         _saveCourseCustomization(
@@ -576,6 +579,13 @@ class _SettingsAutomationViewState extends State<SettingsAutomationView> {
                           timeOffsetMinutes: o,
                         ),
                       ),
+                    ),
+                  if (offset != 0 &&
+                      !const [-30, -15, 15, 30, 60, 120].contains(offset))
+                    ChoiceChip(
+                      label: Text('${offset > 0 ? '+' : ''}${offset}m'),
+                      selected: true,
+                      onSelected: null,
                     ),
                 ],
               ),
