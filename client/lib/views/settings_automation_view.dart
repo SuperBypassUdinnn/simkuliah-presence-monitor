@@ -15,6 +15,20 @@ import '../models/user_preferences_model.dart';
 import '../services/presence_service.dart';
 import 'widgets/error_state_view.dart';
 
+/// How a course's effective lecture time is derived.
+enum _TimingMode { official, relative, absolute }
+
+/// Day labels indexed by the database `custom_day_of_week` value (1 = Monday).
+const List<String> _dayLabels = [
+  'Senin',
+  'Selasa',
+  'Rabu',
+  'Kamis',
+  'Jumat',
+  'Sabtu',
+  'Minggu',
+];
+
 class SettingsAutomationView extends StatefulWidget {
   final PresenceService? presenceService;
 
@@ -154,24 +168,52 @@ class _SettingsAutomationViewState extends State<SettingsAutomationView> {
     }
   }
 
+  /// Persist a course-level customization.
+  ///
+  /// Absolute overrides (`custom_start_time` / `custom_end_time`) and the
+  /// per-course reminder override are nullable columns, so switching a course
+  /// back to its official schedule or to the global reminder has to clear
+  /// them explicitly: `copyWith` cannot express a null.
   Future<void> _saveCourseCustomization(
     ScheduleModel schedule, {
     bool? autoPresence,
     int? timeOffsetMinutes,
+    int? customDayOfWeek,
+    String? customStartTime,
+    String? customEndTime,
+    bool clearAbsolute = false,
     int? reminderLeadMinutes,
+    bool clearReminder = false,
   }) async {
     try {
       final existing = _customizationFor(schedule);
-      final model =
-          (existing ?? ScheduleCustomizationModel(scheduleId: schedule.id))
-              .copyWith(
-                autoPresenceEnabled:
-                    autoPresence ?? existing?.autoPresenceEnabled ?? false,
-                timeOffsetMinutes:
-                    timeOffsetMinutes ?? existing?.timeOffsetMinutes ?? 0,
-                reminderLeadMinutes:
-                    reminderLeadMinutes ?? existing?.reminderLeadMinutes,
-              );
+      final base =
+          existing ?? ScheduleCustomizationModel(scheduleId: schedule.id);
+
+      final resolvedStart = clearAbsolute
+          ? null
+          : customStartTime ?? base.customStartTime;
+      final resolvedEnd = clearAbsolute
+          ? null
+          : customEndTime ?? base.customEndTime;
+      final hasAbsolute = resolvedStart != null && resolvedEnd != null;
+
+      final model = ScheduleCustomizationModel(
+        id: base.id,
+        scheduleId: schedule.id,
+        meetingId: null,
+        timeOffsetMinutes: timeOffsetMinutes ?? base.timeOffsetMinutes,
+        customDayOfWeek: hasAbsolute
+            ? customDayOfWeek ?? base.customDayOfWeek ?? 1
+            : null,
+        customStartTime: hasAbsolute ? resolvedStart : null,
+        customEndTime: hasAbsolute ? resolvedEnd : null,
+        autoPresenceEnabled: autoPresence ?? base.autoPresenceEnabled,
+        reminderLeadMinutes: clearReminder
+            ? null
+            : reminderLeadMinutes ?? base.reminderLeadMinutes,
+      );
+
       final saved = await _service.saveCustomization(model);
       if (mounted) {
         setState(() {
@@ -373,10 +415,88 @@ class _SettingsAutomationViewState extends State<SettingsAutomationView> {
     }
   }
 
+  /// Derive the active timing mode from the stored customization.
+  _TimingMode _timingModeFor(ScheduleCustomizationModel? cust) {
+    if (cust == null) return _TimingMode.official;
+    if (cust.customStartTime != null && cust.customEndTime != null) {
+      return _TimingMode.absolute;
+    }
+    if (cust.timeOffsetMinutes != 0) return _TimingMode.relative;
+    return _TimingMode.official;
+  }
+
+  /// Trim a database time string to `HH:mm`.
+  String _shortTime(String raw) {
+    final match = RegExp(r'(\d{2})[:.](\d{2})').firstMatch(raw);
+    if (match == null) return raw;
+    return '${match.group(1)}:${match.group(2)}';
+  }
+
+  /// Switch a course between official, relative, and absolute timing.
+  Future<void> _selectTimingMode(
+    ScheduleModel schedule,
+    _TimingMode mode,
+    ScheduleCustomizationModel? cust,
+  ) async {
+    final future = switch (mode) {
+      _TimingMode.official => _saveCourseCustomization(
+        schedule,
+        timeOffsetMinutes: 0,
+        clearAbsolute: true,
+      ),
+      _TimingMode.relative => _saveCourseCustomization(
+        schedule,
+        clearAbsolute: true,
+      ),
+      _TimingMode.absolute => _saveCourseCustomization(
+        schedule,
+        customDayOfWeek: cust?.customDayOfWeek ?? 1,
+        customStartTime: _shortTime(
+          cust?.customStartTime ?? schedule.startTime,
+        ),
+        customEndTime: _shortTime(cust?.customEndTime ?? schedule.endTime),
+      ),
+    };
+    await future;
+  }
+
+  /// Pick the absolute start or end time for a course.
+  Future<void> _pickAbsoluteTime(
+    ScheduleModel schedule, {
+    required bool isStart,
+  }) async {
+    final cust = _customizationFor(schedule);
+    final raw = isStart
+        ? cust?.customStartTime ?? schedule.startTime
+        : cust?.customEndTime ?? schedule.endTime;
+    final parts = _shortTime(raw).split(':');
+    final initial = TimeOfDay(
+      hour: parts.isNotEmpty ? int.tryParse(parts.first) ?? 8 : 8,
+      minute: parts.length > 1 ? int.tryParse(parts[1]) ?? 0 : 0,
+    );
+
+    final picked = await showTimePicker(context: context, initialTime: initial);
+    if (picked == null || !mounted) return;
+
+    final formatted =
+        '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}';
+    final other = isStart
+        ? cust?.customEndTime ?? schedule.endTime
+        : cust?.customStartTime ?? schedule.startTime;
+
+    await _saveCourseCustomization(
+      schedule,
+      customDayOfWeek: cust?.customDayOfWeek ?? 1,
+      customStartTime: isStart ? formatted : _shortTime(other),
+      customEndTime: isStart ? _shortTime(other) : formatted,
+    );
+  }
+
   Widget _buildCourseCard(BuildContext context, ScheduleModel schedule) {
     final cust = _customizationFor(schedule);
     final autoPresence = cust?.autoPresenceEnabled ?? false;
     final offset = cust?.timeOffsetMinutes ?? 0;
+    final mode = _timingModeFor(cust);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -394,7 +514,9 @@ class _SettingsAutomationViewState extends State<SettingsAutomationView> {
             ),
             const SizedBox(height: 2),
             Text(
-              '${schedule.courseCode} · Kelas ${schedule.classGroup} · ${schedule.startTime} - ${schedule.endTime} WIB',
+              '${schedule.courseCode} · Kelas ${schedule.classGroup} · '
+              '${_shortTime(schedule.startTime)} - '
+              '${_shortTime(schedule.endTime)} WIB',
               style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
             ),
             const SizedBox(height: 12),
@@ -415,17 +537,129 @@ class _SettingsAutomationViewState extends State<SettingsAutomationView> {
               ),
             ),
             const SizedBox(height: 8),
+            const Text(
+              'Penyesuaian Waktu',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 6),
+            SegmentedButton<_TimingMode>(
+              segments: const [
+                ButtonSegment(value: _TimingMode.official, label: Text('Asli')),
+                ButtonSegment(
+                  value: _TimingMode.relative,
+                  label: Text('Relatif'),
+                ),
+                ButtonSegment(
+                  value: _TimingMode.absolute,
+                  label: Text('Pindah'),
+                ),
+              ],
+              selected: {mode},
+              showSelectedIcon: false,
+              style: const ButtonStyle(visualDensity: VisualDensity.compact),
+              onSelectionChanged: (selection) =>
+                  unawaited(_selectTimingMode(schedule, selection.first, cust)),
+            ),
+            if (mode == _TimingMode.relative) ...[
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  for (final o in const [-30, -15, 0, 15, 30, 60, 120])
+                    ChoiceChip(
+                      label: Text(o == 0 ? '0m' : '${o > 0 ? '+' : ''}${o}m'),
+                      selected: offset == o,
+                      onSelected: (_) => unawaited(
+                        _saveCourseCustomization(
+                          schedule,
+                          timeOffsetMinutes: o,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ],
+            if (mode == _TimingMode.absolute) ...[
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  DropdownButton<int>(
+                    value: cust?.customDayOfWeek ?? 1,
+                    underline: const SizedBox.shrink(),
+                    items: [
+                      for (var day = 1; day <= 7; day++)
+                        DropdownMenuItem(
+                          value: day,
+                          child: Text(_dayLabels[day - 1]),
+                        ),
+                    ],
+                    onChanged: (day) {
+                      if (day == null) return;
+                      unawaited(
+                        _saveCourseCustomization(
+                          schedule,
+                          customDayOfWeek: day,
+                          customStartTime: _shortTime(
+                            cust?.customStartTime ?? schedule.startTime,
+                          ),
+                          customEndTime: _shortTime(
+                            cust?.customEndTime ?? schedule.endTime,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.schedule, size: 16),
+                    label: Text(
+                      'Mulai '
+                      '${_shortTime(cust?.customStartTime ?? schedule.startTime)}',
+                    ),
+                    onPressed: () =>
+                        unawaited(_pickAbsoluteTime(schedule, isStart: true)),
+                  ),
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.schedule, size: 16),
+                    label: Text(
+                      'Selesai '
+                      '${_shortTime(cust?.customEndTime ?? schedule.endTime)}',
+                    ),
+                    onPressed: () =>
+                        unawaited(_pickAbsoluteTime(schedule, isStart: false)),
+                  ),
+                ],
+              ),
+            ],
+            const SizedBox(height: 10),
+            const Text(
+              'Pengingat Kuliah',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 6),
             Wrap(
               spacing: 6,
               runSpacing: 6,
               children: [
-                const Text('Offset: ', style: TextStyle(fontSize: 13)),
-                for (final o in const [-30, -15, 0, 15, 30, 60, 120])
+                ChoiceChip(
+                  label: const Text('Ikuti Global'),
+                  selected: cust?.reminderLeadMinutes == null,
+                  onSelected: (_) => unawaited(
+                    _saveCourseCustomization(schedule, clearReminder: true),
+                  ),
+                ),
+                for (final minutes in const [5, 10, 15, 30])
                   ChoiceChip(
-                    label: Text(o == 0 ? 'Asli' : '${o > 0 ? '+' : ''}${o}m'),
-                    selected: offset == o,
+                    label: Text('${minutes}m'),
+                    selected: cust?.reminderLeadMinutes == minutes,
                     onSelected: (_) => unawaited(
-                      _saveCourseCustomization(schedule, timeOffsetMinutes: o),
+                      _saveCourseCustomization(
+                        schedule,
+                        reminderLeadMinutes: minutes,
+                      ),
                     ),
                   ),
               ],
