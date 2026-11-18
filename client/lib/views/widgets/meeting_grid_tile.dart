@@ -8,7 +8,6 @@ import '../../core/error_message.dart';
 import '../../core/override_style.dart';
 import '../../models/meeting_model.dart';
 import '../../services/presence_service.dart';
-import 'schedule_customization_dialog.dart';
 
 /// Effective lecture window after applying a schedule customization.
 ///
@@ -308,25 +307,6 @@ class MeetingGridTile extends StatelessWidget {
               ),
             ),
             actions: [
-              TextButton.icon(
-                icon: const Icon(Icons.tune, size: 16),
-                label: const Text('Sesuaikan Jadwal'),
-                onPressed: () {
-                  Navigator.of(dialogContext).pop();
-                  showDialog(
-                    context: context,
-                    builder: (_) => ScheduleCustomizationDialog(
-                      courseName: meeting.courseName,
-                      courseCode: meeting.courseCode,
-                      scheduleId: meeting.scheduleId ?? 0,
-                      meetingId: meeting.id,
-                      meetingNumber: meeting.meetingNumber,
-                      presenceService: service,
-                      onSaved: (_) => onOverrideChanged?.call(),
-                    ),
-                  );
-                },
-              ),
               TextButton(
                 onPressed: () => Navigator.of(dialogContext).pop(),
                 child: const Text('Tutup'),
