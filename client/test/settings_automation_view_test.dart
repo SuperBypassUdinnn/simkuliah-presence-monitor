@@ -54,10 +54,13 @@ void main() {
     expect(find.text('Pengaturan & Automasi'), findsOneWidget);
     expect(find.text('Pengingat Masuk Kuliah (Global)'), findsOneWidget);
     expect(find.text('Grafika Komputer'), findsOneWidget);
-    expect(find.text('Presensi Otomatis (Semua Pertemuan)'), findsOneWidget);
+    // Per-meeting auto-presence button is shown instead of the old global switch.
+    expect(find.text('Pilih Pertemuan'), findsOneWidget);
+    // Schedule has no meeting rows loaded, so the status text reflects that.
+    expect(find.text('Belum ada data pertemuan'), findsOneWidget);
     // Official portal window is trimmed to HH:mm.
     expect(find.textContaining('08:00 - 09:40 WIB'), findsOneWidget);
-    // Per-course reminder override defaults to the global value.
+    // Per-course reminder override defaults to global — lead-time chips visible.
     expect(find.text('Ikuti Global'), findsOneWidget);
   });
 

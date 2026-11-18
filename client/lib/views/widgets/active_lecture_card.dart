@@ -316,6 +316,19 @@ class _ActiveLectureCardState extends State<ActiveLectureCard> {
     }
   }
 
+  /// True when the displayed time actually differs from the official portal
+  /// schedule. Only then should the `(Portal: HH:mm)` badge be shown.
+  ///
+  /// A customization row that only carries `autoPresenceEnabled = true` with
+  /// `timeOffsetMinutes == 0` and no absolute overrides does NOT change the
+  /// displayed time, so the badge must stay hidden.
+  bool _hasEffectiveTimeOverride() {
+    final cust = widget.customization;
+    if (cust == null) return false;
+    if (cust.customStartTime != null && cust.customEndTime != null) return true;
+    return cust.timeOffsetMinutes != 0;
+  }
+
   String _getEffectiveTimeText() {
     final cust = widget.customization;
     if (cust == null) {
@@ -380,6 +393,11 @@ class _ActiveLectureCardState extends State<ActiveLectureCard> {
   String _autoPresenceSubtitle() {
     final meeting = widget.meeting;
     if (meeting.isAttended) {
+      // If auto-absen was enabled, it was most likely the one that submitted
+      // the attendance; show a distinct "berhasil" message.
+      if (_autoPresence) {
+        return 'Auto-Absen berhasil: kehadiran tercatat otomatis di Simkuliah';
+      }
       return 'Tidak diperlukan: presensi sudah tercatat di Simkuliah';
     }
     final deadline = meeting.deadlineAt;
@@ -665,10 +683,7 @@ class _ActiveLectureCardState extends State<ActiveLectureCard> {
                         _getEffectiveTimeText(),
                         style: Theme.of(context).textTheme.bodyMedium,
                       ),
-                      if (widget.customization != null &&
-                          (widget.customization!.timeOffsetMinutes != 0 ||
-                              widget.customization!.customStartTime !=
-                                  null)) ...[
+                      if (_hasEffectiveTimeOverride()) ...[
                         const SizedBox(width: 6),
                         Container(
                           padding: const EdgeInsets.symmetric(

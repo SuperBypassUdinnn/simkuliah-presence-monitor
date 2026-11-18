@@ -139,6 +139,128 @@ class _SettingsAutomationViewState extends State<SettingsAutomationView> {
     return null;
   }
 
+  /// Return the meeting-level customization for one specific meeting, or null.
+  ScheduleCustomizationModel? _customizationForMeeting(
+    int scheduleId,
+    int meetingId,
+  ) {
+    for (final c in _customizations) {
+      if (c.scheduleId == scheduleId && c.meetingId == meetingId) return c;
+    }
+    return null;
+  }
+
+  /// How many meetings in [schedule] have `autoPresenceEnabled == true`.
+  int _autoPresenceEnabledCount(ScheduleModel schedule) => _customizations
+      .where(
+        (c) =>
+            c.scheduleId == schedule.id &&
+            c.meetingId != null &&
+            c.autoPresenceEnabled,
+      )
+      .length;
+
+  /// Toggle the global reminder on/off flag.
+  Future<void> _saveGlobalReminderEnabled(bool enabled) async {
+    try {
+      final updated = (_preferences ?? const UserPreferencesModel()).copyWith(
+        reminderEnabled: enabled,
+      );
+      final saved = await _service.saveUserPreferences(updated);
+      if (mounted) setState(() => _preferences = saved);
+    } catch (error) {
+      if (mounted) {
+        AppNotification.show(
+          context,
+          title: 'Gagal Menyimpan Pengingat',
+          message: friendlyErrorMessage(error),
+          color: Colors.red.shade600,
+          icon: Icons.error_outline,
+        );
+      }
+    }
+  }
+
+  /// Toggle auto-presence for a single meeting (called from the per-meeting
+  /// selection dialog in settings and kept in sync with the card toggle).
+  Future<void> _saveMeetingAutoPresenceInSettings({
+    required int scheduleId,
+    required int meetingId,
+    required bool enabled,
+  }) async {
+    try {
+      final saved = await _service.saveMeetingAutoPresence(
+        scheduleId: scheduleId,
+        meetingId: meetingId,
+        enabled: enabled,
+      );
+      if (mounted) {
+        setState(() {
+          _customizations = [
+            ..._customizations.where(
+              (c) => !(c.scheduleId == scheduleId && c.meetingId == meetingId),
+            ),
+            saved,
+          ];
+        });
+        RefreshBus.instance.requestRefresh();
+      }
+    } catch (error) {
+      if (mounted) {
+        AppNotification.show(
+          context,
+          title: 'Gagal Mengubah Auto-Absen',
+          message: friendlyErrorMessage(error),
+          color: Colors.red.shade600,
+          icon: Icons.error_outline,
+        );
+      }
+    }
+  }
+
+  /// Open the per-meeting auto-presence selection dialog.
+  Future<void> _showAutoPresenceMeetingsDialog(
+    BuildContext ctx,
+    ScheduleModel schedule,
+  ) async {
+    final meetings = schedule.meetings;
+    if (meetings.isEmpty) {
+      if (mounted) {
+        AppNotification.show(
+          ctx,
+          title: 'Data Pertemuan Belum Tersedia',
+          message: 'Muat ulang halaman untuk memuat daftar pertemuan.',
+          color: Colors.orange,
+          icon: Icons.info_outline,
+        );
+      }
+      return;
+    }
+
+    final initialEnabled = {
+      for (final m in meetings)
+        m.id:
+            _customizationForMeeting(schedule.id, m.id)?.autoPresenceEnabled ??
+            false,
+    };
+
+    if (!mounted) return;
+    await showDialog<void>(
+      context: ctx,
+      builder: (_) => _AutoPresenceMeetingsDialog(
+        schedule: schedule,
+        initialEnabled: initialEnabled,
+        onToggle: (meetingId, enabled) => unawaited(
+          _saveMeetingAutoPresenceInSettings(
+            scheduleId: schedule.id,
+            meetingId: meetingId,
+            enabled: enabled,
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _saveGlobalReminder(int minutes) async {
     try {
       final updated = (_preferences ?? UserPreferencesModel()).copyWith(
@@ -184,6 +306,8 @@ class _SettingsAutomationViewState extends State<SettingsAutomationView> {
     bool clearAbsolute = false,
     int? reminderLeadMinutes,
     bool clearReminder = false,
+    bool? reminderEnabled,
+    bool clearReminderEnabled = false,
   }) async {
     try {
       final existing = _customizationFor(schedule);
@@ -212,6 +336,9 @@ class _SettingsAutomationViewState extends State<SettingsAutomationView> {
         reminderLeadMinutes: clearReminder
             ? null
             : reminderLeadMinutes ?? base.reminderLeadMinutes,
+        reminderEnabled: clearReminderEnabled
+            ? null
+            : reminderEnabled ?? base.reminderEnabled,
       );
 
       final saved = await _service.saveCustomization(model);
@@ -239,23 +366,55 @@ class _SettingsAutomationViewState extends State<SettingsAutomationView> {
     }
   }
 
+  /// Reset timing-only fields (offset, absolute override, reminder) for a
+  /// course back to the official Simkuliah schedule while preserving
+  /// `autoPresenceEnabled`. If nothing remains after clearing, the row is
+  /// deleted entirely.
   Future<void> _resetCourseCustomization(ScheduleModel schedule) async {
     try {
       final existing = _customizationFor(schedule);
-      if (existing?.id != null) {
-        await _service.deleteCustomization(existing!.id!);
+      if (existing == null) return;
+
+      final keepAutoPresence = existing.autoPresenceEnabled;
+
+      if (!keepAutoPresence) {
+        // Nothing to preserve — delete the row entirely.
+        if (existing.id != null) {
+          await _service.deleteCustomization(existing.id!);
+        }
+        if (mounted) {
+          setState(() {
+            _customizations = _customizations
+                .where((c) => c.id != existing.id)
+                .toList();
+          });
+        }
+      } else {
+        // Keep auto-presence; clear only timing and reminder overrides.
+        final saved = await _service.saveCustomization(
+          ScheduleCustomizationModel(
+            id: existing.id,
+            scheduleId: schedule.id,
+            autoPresenceEnabled: true,
+          ),
+        );
+        if (mounted) {
+          setState(() {
+            _customizations = [
+              ..._customizations.where((c) => c.id != saved.id),
+              saved,
+            ];
+          });
+        }
       }
       if (mounted) {
-        setState(() {
-          _customizations = _customizations
-              .where((c) => c.id != existing?.id)
-              .toList();
-        });
         RefreshBus.instance.requestRefresh();
         AppNotification.show(
           context,
-          title: 'Penyesuaian Dihapus',
-          message: '${schedule.courseName} kembali ke jadwal resmi Simkuliah.',
+          title: 'Jadwal Direset',
+          message: keepAutoPresence
+              ? '${schedule.courseName} kembali ke jadwal resmi; presensi otomatis tetap aktif.'
+              : '${schedule.courseName} kembali ke jadwal resmi Simkuliah.',
           color: Colors.blueGrey,
           icon: Icons.restore,
         );
@@ -264,7 +423,7 @@ class _SettingsAutomationViewState extends State<SettingsAutomationView> {
       if (mounted) {
         AppNotification.show(
           context,
-          title: 'Gagal Menghapus Penyesuaian',
+          title: 'Gagal Mereset Jadwal',
           message: friendlyErrorMessage(error),
           color: Colors.red.shade600,
           icon: Icons.error_outline,
@@ -327,6 +486,7 @@ class _SettingsAutomationViewState extends State<SettingsAutomationView> {
 
   Widget _buildGlobalReminderCard(BuildContext context) {
     final current = _preferences?.defaultReminderMinutes ?? 15;
+    final reminderEnabled = _preferences?.reminderEnabled ?? true;
     return Card(
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -348,33 +508,42 @@ class _SettingsAutomationViewState extends State<SettingsAutomationView> {
                     style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                   ),
                 ),
+                Switch(
+                  value: reminderEnabled,
+                  onChanged: (val) =>
+                      unawaited(_saveGlobalReminderEnabled(val)),
+                ),
               ],
             ),
             const SizedBox(height: 6),
             Text(
-              'Notifikasi pengingat dikirim $current menit sebelum kuliah dimulai.',
+              reminderEnabled
+                  ? 'Notifikasi pengingat dikirim $current menit sebelum kuliah dimulai.'
+                  : 'Pengingat dinonaktifkan secara global.',
               style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
             ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                ..._reminderTemplates.map(
-                  (m) => ChoiceChip(
-                    label: Text('${m}m'),
-                    selected: current == m,
-                    onSelected: (_) => unawaited(_saveGlobalReminder(m)),
+            if (reminderEnabled) ...[
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  ..._reminderTemplates.map(
+                    (m) => ChoiceChip(
+                      label: Text('${m}m'),
+                      selected: current == m,
+                      onSelected: (_) => unawaited(_saveGlobalReminder(m)),
+                    ),
                   ),
-                ),
-                ActionChip(
-                  label: Text('Kustom (${current}m)'),
-                  avatar: const Icon(Icons.edit, size: 16),
-                  onPressed: () =>
-                      unawaited(_showCustomReminderDialog(current)),
-                ),
-              ],
-            ),
+                  ActionChip(
+                    label: Text('Kustom (${current}m)'),
+                    avatar: const Icon(Icons.edit, size: 16),
+                    onPressed: () =>
+                        unawaited(_showCustomReminderDialog(current)),
+                  ),
+                ],
+              ),
+            ],
           ],
         ),
       ),
@@ -497,9 +666,15 @@ class _SettingsAutomationViewState extends State<SettingsAutomationView> {
 
   Widget _buildCourseCard(BuildContext context, ScheduleModel schedule) {
     final cust = _customizationFor(schedule);
-    final autoPresence = cust?.autoPresenceEnabled ?? false;
     final offset = cust?.timeOffsetMinutes ?? 0;
     final mode = _timingModeFor(cust);
+    final enabledCount = _autoPresenceEnabledCount(schedule);
+    final totalMeetings = schedule.meetings.length;
+
+    // Effective reminder enabled: per-course override wins, falls back to global.
+    final globalReminderEnabled = _preferences?.reminderEnabled ?? true;
+    final courseReminderEnabled =
+        cust?.reminderEnabled ?? globalReminderEnabled;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -523,23 +698,55 @@ class _SettingsAutomationViewState extends State<SettingsAutomationView> {
               style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
             ),
             const SizedBox(height: 12),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              dense: true,
-              title: const Text(
-                'Presensi Otomatis (Semua Pertemuan)',
-                style: TextStyle(fontWeight: FontWeight.w600),
-              ),
-              subtitle: const Text(
-                'Konfirmasi kehadiran otomatis saat dosen membuka presensi.',
-                style: TextStyle(fontSize: 12),
-              ),
-              value: autoPresence,
-              onChanged: (val) => unawaited(
-                _saveCourseCustomization(schedule, autoPresence: val),
-              ),
+
+            // --- Auto-presence per-meeting selection (Fix #3) ---
+            const Text(
+              'Presensi Otomatis',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    totalMeetings == 0
+                        ? 'Belum ada data pertemuan'
+                        : enabledCount == 0
+                        ? 'Tidak ada pertemuan yang dipilih'
+                        : enabledCount == totalMeetings
+                        ? 'Semua pertemuan ($totalMeetings) dipilih'
+                        : '$enabledCount dari $totalMeetings pertemuan dipilih',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: enabledCount > 0
+                          ? Colors.amber.shade800
+                          : Colors.grey.shade600,
+                    ),
+                  ),
+                ),
+                OutlinedButton.icon(
+                  icon: Icon(
+                    Icons.bolt,
+                    size: 16,
+                    color: enabledCount > 0 ? Colors.amber.shade800 : null,
+                  ),
+                  label: const Text('Pilih Pertemuan'),
+                  style: enabledCount > 0
+                      ? OutlinedButton.styleFrom(
+                          foregroundColor: Colors.amber.shade800,
+                          side: BorderSide(color: Colors.amber.shade400),
+                        )
+                      : null,
+                  onPressed: totalMeetings == 0
+                      ? null
+                      : () => unawaited(
+                          _showAutoPresenceMeetingsDialog(context, schedule),
+                        ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 12),
             const Text(
               'Penyesuaian Waktu',
               style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
@@ -644,36 +851,69 @@ class _SettingsAutomationViewState extends State<SettingsAutomationView> {
                 ],
               ),
             ],
+
             const SizedBox(height: 10),
             const Text(
               'Pengingat Kuliah',
               style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
             ),
-            const SizedBox(height: 6),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
+            const SizedBox(height: 4),
+
+            // Per-course reminder override toggle (Fix #5).
+            Row(
               children: [
-                ChoiceChip(
-                  label: const Text('Ikuti Global'),
-                  selected: cust?.reminderLeadMinutes == null,
-                  onSelected: (_) => unawaited(
-                    _saveCourseCustomization(schedule, clearReminder: true),
+                const Expanded(
+                  child: Text(
+                    'Pengingat mata kuliah ini',
+                    style: TextStyle(fontSize: 13),
                   ),
                 ),
-                for (final minutes in const [5, 10, 15, 30])
-                  ChoiceChip(
-                    label: Text('${minutes}m'),
-                    selected: cust?.reminderLeadMinutes == minutes,
-                    onSelected: (_) => unawaited(
+                // "Ikuti global" chip resets the per-course override.
+                if (cust?.reminderEnabled != null)
+                  TextButton(
+                    onPressed: () => unawaited(
                       _saveCourseCustomization(
                         schedule,
-                        reminderLeadMinutes: minutes,
+                        clearReminderEnabled: true,
                       ),
                     ),
+                    child: const Text('Ikuti global'),
                   ),
+                Switch(
+                  value: courseReminderEnabled,
+                  onChanged: (val) => unawaited(
+                    _saveCourseCustomization(schedule, reminderEnabled: val),
+                  ),
+                ),
               ],
             ),
+            if (courseReminderEnabled) ...[
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  ChoiceChip(
+                    label: const Text('Ikuti Global'),
+                    selected: cust?.reminderLeadMinutes == null,
+                    onSelected: (_) => unawaited(
+                      _saveCourseCustomization(schedule, clearReminder: true),
+                    ),
+                  ),
+                  for (final minutes in const [5, 10, 15, 30])
+                    ChoiceChip(
+                      label: Text('${minutes}m'),
+                      selected: cust?.reminderLeadMinutes == minutes,
+                      onSelected: (_) => unawaited(
+                        _saveCourseCustomization(
+                          schedule,
+                          reminderLeadMinutes: minutes,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ],
+
             const SizedBox(height: 8),
             Align(
               alignment: Alignment.centerRight,
@@ -688,6 +928,129 @@ class _SettingsAutomationViewState extends State<SettingsAutomationView> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Dialog for per-meeting auto-presence selection.
+///
+/// Shows a list of all meetings for the schedule with individual toggles and a
+/// "Pilih Semua" / "Batalkan Semua" quick-action button.
+class _AutoPresenceMeetingsDialog extends StatefulWidget {
+  final ScheduleModel schedule;
+  final Map<int, bool> initialEnabled;
+  final void Function(int meetingId, bool enabled) onToggle;
+
+  const _AutoPresenceMeetingsDialog({
+    required this.schedule,
+    required this.initialEnabled,
+    required this.onToggle,
+  });
+
+  @override
+  State<_AutoPresenceMeetingsDialog> createState() =>
+      _AutoPresenceMeetingsDialogState();
+}
+
+class _AutoPresenceMeetingsDialogState
+    extends State<_AutoPresenceMeetingsDialog> {
+  late final Map<int, bool> _enabled;
+
+  @override
+  void initState() {
+    super.initState();
+    _enabled = Map.from(widget.initialEnabled);
+  }
+
+  bool get _allEnabled =>
+      widget.schedule.meetings.every((m) => _enabled[m.id] == true);
+
+  void _toggleAll(bool enable) {
+    for (final m in widget.schedule.meetings) {
+      if ((_enabled[m.id] ?? false) != enable) {
+        setState(() => _enabled[m.id] = enable);
+        widget.onToggle(m.id, enable);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final meetings = widget.schedule.meetings;
+    final enabledCount = _enabled.values.where((v) => v).length;
+
+    return AlertDialog(
+      title: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Auto-Absen — ${widget.schedule.courseName}',
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '$enabledCount dari ${meetings.length} pertemuan aktif',
+            style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+          ),
+        ],
+      ),
+      contentPadding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // "Pilih Semua" / "Batalkan Semua" quick-action.
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => _toggleAll(!_allEnabled),
+                    child: Text(_allEnabled ? 'Batalkan Semua' : 'Pilih Semua'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            const Divider(height: 1),
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: meetings.length,
+                itemBuilder: (_, i) {
+                  final meeting = meetings[i];
+                  final isEnabled = _enabled[meeting.id] ?? false;
+                  return SwitchListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(
+                      'Pertemuan ${meeting.meetingNumber}',
+                      style: const TextStyle(fontSize: 13),
+                    ),
+                    subtitle: meeting.meetingDate.isNotEmpty
+                        ? Text(
+                            meeting.meetingDate,
+                            style: const TextStyle(fontSize: 11),
+                          )
+                        : null,
+                    value: isEnabled,
+                    onChanged: (val) {
+                      setState(() => _enabled[meeting.id] = val);
+                      widget.onToggle(meeting.id, val);
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Selesai'),
+        ),
+      ],
     );
   }
 }

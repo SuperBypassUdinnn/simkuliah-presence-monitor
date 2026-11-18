@@ -12,6 +12,12 @@ class ScheduleCustomizationModel {
   final String? customEndTime;
   final bool autoPresenceEnabled;
   final int? reminderLeadMinutes;
+
+  /// Per-course reminder override. NULL = inherit the global `reminderEnabled`
+  /// setting from `user_preferences`. When explicitly set to true or false,
+  /// it overrides the global flag for this course only.
+  final bool? reminderEnabled;
+
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
@@ -25,6 +31,7 @@ class ScheduleCustomizationModel {
     this.customEndTime,
     this.autoPresenceEnabled = false,
     this.reminderLeadMinutes,
+    this.reminderEnabled,
     this.createdAt,
     this.updatedAt,
   });
@@ -40,6 +47,7 @@ class ScheduleCustomizationModel {
       customEndTime: json['custom_end_time'] as String?,
       autoPresenceEnabled: json['auto_presence_enabled'] as bool? ?? false,
       reminderLeadMinutes: json['reminder_lead_minutes'] as int?,
+      reminderEnabled: json['reminder_enabled'] as bool?,
       createdAt: json['created_at'] != null
           ? DateTime.tryParse(json['created_at'] as String)
           : null,
@@ -59,6 +67,7 @@ class ScheduleCustomizationModel {
       'custom_end_time': customEndTime,
       'auto_presence_enabled': autoPresenceEnabled,
       'reminder_lead_minutes': reminderLeadMinutes,
+      'reminder_enabled': reminderEnabled,
     };
     if (id != null) {
       map['id'] = id;
@@ -76,6 +85,7 @@ class ScheduleCustomizationModel {
     String? customEndTime,
     bool? autoPresenceEnabled,
     int? reminderLeadMinutes,
+    bool? reminderEnabled,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
@@ -89,6 +99,7 @@ class ScheduleCustomizationModel {
       customEndTime: customEndTime ?? this.customEndTime,
       autoPresenceEnabled: autoPresenceEnabled ?? this.autoPresenceEnabled,
       reminderLeadMinutes: reminderLeadMinutes ?? this.reminderLeadMinutes,
+      reminderEnabled: reminderEnabled ?? this.reminderEnabled,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );
