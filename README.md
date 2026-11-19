@@ -31,6 +31,26 @@ Verify parity between `.planning/README.md` and feature logs in `docs/backlog/fe
 python3 scripts/sync_backlog_status.py --check
 ```
 
+### 4. Database Migrations
+Migrations live in `supabase/migrations/` and are applied to the hosted project
+(`ftznonanlbshweysliar`) automatically.
+
+- **Automatic**: merging a change under `supabase/migrations/**` into `main`
+  triggers `.github/workflows/supabase-deploy.yml`, which runs a dry run and
+  then `supabase db push --remote --yes`.
+- **Manual**: run the same workflow from the Actions tab via `workflow_dispatch`.
+- **Required secret**: `SUPABASE_ACCESS_TOKEN` (repository secret). No database
+  password is needed because the CLI authenticates through the Management API.
+
+Local inspection without Docker:
+```bash
+# List local vs remote migration state
+supabase migration list --remote
+
+# Preview what would be applied
+supabase db push --remote --dry-run
+```
+
 ## Repository Structure
 
 ```text
