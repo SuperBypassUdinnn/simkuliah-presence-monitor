@@ -52,7 +52,7 @@ Canonical repository governance contract for OpenCode and Antigravity AI agents.
    - `.planning/`: High-level architectural roadmaps, domain epic specifications, and technical designs (`NN-name.md`), cataloged in `.planning/README.md`.
    - `docs/backlog/features/`: Task-level feature execution logs (`F-XXX-name.md`) tied to specific issues. Every feature log must link to its parent plan in `.planning/`.
 2. **Active Frontier in Root**: Plans under active consideration (`Draft`, `Backlog`, `In Progress`) or completed in the current cycle (`Merged`) remain in `.planning/`.
-3. **Milestone Release Archiving Trigger**: When cutting a release and incrementing `VERSION` (e.g. `v1.0.0`), all plans marked `Merged` during that cycle MUST be archived into `.planning/archive/<version>/`.
+3. **Release Tagging**: Releases are marked with an annotated git tag `vX.Y.Z` matching the client version in `client/pubspec.yaml` (the single source of truth for the app version). There is no root `VERSION` file. When a tagged release makes `.planning/` crowded, plans already marked `Merged` MAY be archived into `.planning/archive/<tag>/`.
 
 
 ## Git & Operational Constraints
