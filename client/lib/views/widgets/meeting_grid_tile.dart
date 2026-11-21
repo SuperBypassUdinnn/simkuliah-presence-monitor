@@ -70,6 +70,28 @@ enum _MeetingIndicatorStatus {
   pending,
 }
 
+/// Indonesian day names indexed by `DateTime.weekday` (1 = Monday).
+const List<String> _dayNames = [
+  'Senin',
+  'Selasa',
+  'Rabu',
+  'Kamis',
+  'Jumat',
+  'Sabtu',
+  'Minggu',
+];
+
+/// Resolve the Indonesian day name from a meeting date string
+/// (`YYYY-MM-DD`). Simkuliah carries no explicit day-of-week field, so the
+/// day is always derived from the date; returns '-' for unparseable dates.
+String _dayNameFor(String meetingDate) {
+  final date = DateTime.tryParse(meetingDate);
+  if (date == null) return '-';
+  final index = date.weekday - 1;
+  if (index < 0 || index >= _dayNames.length) return '-';
+  return _dayNames[index];
+}
+
 /// A single cell in the semester matrix grid.
 ///
 /// Displays the meeting number (1-16) with a color-coded status indicator:
@@ -159,151 +181,163 @@ class MeetingGridTile extends StatelessWidget {
               'Pertemuan ${meeting.meetingNumber}',
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
-            content: SingleChildScrollView(
-              child: ListBody(
-                children: [
-                  _detailRow('Mata Kuliah', meeting.courseName),
-                  if (meeting.courseCode.isNotEmpty)
-                    _detailRow(
-                      'Kode & Kelas',
-                      '${meeting.courseCode} (Kelas ${meeting.classGroup})',
-                    ),
-                  _detailRow('Status Kehadiran', meeting.effectiveStatus),
-                  if (meeting.meetingDate.isNotEmpty)
-                    _detailRow('Tanggal', meeting.meetingDate),
-                  if (meeting.startTime.isNotEmpty)
-                    _detailRow('Jam', _effectiveTimeLabel(meeting)),
-                  if (meeting.room.isNotEmpty)
-                    _detailRow('Ruang', meeting.room),
-                  if (meeting.lecturerName.isNotEmpty &&
-                      meeting.lecturerName.toLowerCase() != 'dosen')
-                    _detailRow('Dosen', meeting.lecturerName),
-                  if (meeting.isPresenceOpen) ...[
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Presensi sedang dibuka oleh dosen!',
-                      style: TextStyle(
-                        color: Colors.orange,
-                        fontWeight: FontWeight.bold,
+            // Cap the dialog height so short content renders as a compact
+            // vertically centered dialog and long content scrolls internally
+            // instead of stretching the dialog edge-to-edge.
+            content: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.sizeOf(context).height * 0.65,
+              ),
+              child: SingleChildScrollView(
+                child: ListBody(
+                  children: [
+                    _detailRow('Mata Kuliah', meeting.courseName),
+                    if (meeting.courseCode.isNotEmpty)
+                      _detailRow(
+                        'Kode & Kelas',
+                        '${meeting.courseCode} (Kelas ${meeting.classGroup})',
                       ),
-                    ),
-                  ],
-                  if (!meeting.isAttended) ...[
-                    const SizedBox(height: 14),
-                    const Divider(),
-                    const SizedBox(height: 6),
-                    Text(
-                      'Keterangan Mandiri:',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Colors.grey,
-                        fontWeight: FontWeight.w600,
+                    _detailRow('Status Kehadiran', meeting.effectiveStatus),
+                    if (meeting.meetingDate.isNotEmpty) ...[
+                      _detailRow('Hari', _dayNameFor(meeting.meetingDate)),
+                      _detailRow('Tanggal', meeting.meetingDate),
+                    ],
+                    if (meeting.startTime.isNotEmpty)
+                      _detailRow('Jam', _effectiveTimeLabel(meeting)),
+                    if (meeting.room.isNotEmpty)
+                      _detailRow('Ruang', meeting.room),
+                    if (meeting.lecturerName.isNotEmpty &&
+                        meeting.lecturerName.toLowerCase() != 'dosen')
+                      _detailRow('Dosen', meeting.lecturerName),
+                    if (meeting.isPresenceOpen) ...[
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Presensi sedang dibuka oleh dosen!',
+                        style: TextStyle(
+                          color: Colors.orange,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 4,
-                      children: OverrideStyle.all.map((style) {
-                        final type = style.type;
-                        final isSelected = currentOverride == type;
-                        final label = style.label;
-                        return ChoiceChip(
-                          label: Text(label),
-                          selected: isSelected,
-                          showCheckmark: false,
-                          selectedColor: style.color,
-                          labelStyle: TextStyle(
-                            color: isSelected ? Colors.white : style.color,
-                            fontWeight: FontWeight.w600,
-                          ),
-                          side: BorderSide(color: style.color),
-                          onSelected: (selected) async {
-                            // Tapping the selected chip once more cancels
-                            // the status; tapping an unselected chip when
-                            // no override is active does nothing.
-                            final isCancel = !selected && isSelected;
-                            if (!selected && !isCancel) return;
-                            final confirmed = await showDialog<bool>(
-                              context: context,
-                              builder: (c) => AlertDialog(
-                                title: Text(
-                                  isCancel
-                                      ? 'Batalkan Keterangan Mandiri?'
-                                      : 'Konfirmasi Keterangan Mandiri',
-                                ),
-                                content: Text(
-                                  isCancel
-                                      ? 'Apakah Anda yakin ingin membatalkan status "$label" untuk pertemuan ini?'
-                                      : 'Apakah Anda yakin ingin menetapkan status pertemuan ini menjadi "$label"?',
-                                ),
-                                actions: [
-                                  TextButton(
-                                    onPressed: () => Navigator.of(c).pop(false),
-                                    child: const Text('Batal'),
+                    ],
+                    if (!meeting.isAttended) ...[
+                      const SizedBox(height: 14),
+                      const Divider(),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Keterangan Mandiri:',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Colors.grey,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 4,
+                        children: OverrideStyle.all.map((style) {
+                          final type = style.type;
+                          final isSelected = currentOverride == type;
+                          final label = style.label;
+                          return ChoiceChip(
+                            label: Text(label),
+                            selected: isSelected,
+                            showCheckmark: false,
+                            selectedColor: style.color,
+                            labelStyle: TextStyle(
+                              color: isSelected ? Colors.white : style.color,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            side: BorderSide(color: style.color),
+                            onSelected: (selected) async {
+                              // Tapping the selected chip once more cancels
+                              // the status; tapping an unselected chip when
+                              // no override is active does nothing.
+                              final isCancel = !selected && isSelected;
+                              if (!selected && !isCancel) return;
+                              final confirmed = await showDialog<bool>(
+                                context: context,
+                                builder: (c) => AlertDialog(
+                                  title: Text(
+                                    isCancel
+                                        ? 'Batalkan Keterangan Mandiri?'
+                                        : 'Konfirmasi Keterangan Mandiri',
                                   ),
-                                  FilledButton(
-                                    style: FilledButton.styleFrom(
-                                      backgroundColor: style.color,
-                                      foregroundColor: Colors.white,
+                                  content: Text(
+                                    isCancel
+                                        ? 'Apakah Anda yakin ingin membatalkan status "$label" untuk pertemuan ini?'
+                                        : 'Apakah Anda yakin ingin menetapkan status pertemuan ini menjadi "$label"?',
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () =>
+                                          Navigator.of(c).pop(false),
+                                      child: const Text('Batal'),
                                     ),
-                                    onPressed: () => Navigator.of(c).pop(true),
-                                    child: const Text(
-                                      'Konfirmasi',
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.white,
+                                    FilledButton(
+                                      style: FilledButton.styleFrom(
+                                        backgroundColor: style.color,
+                                        foregroundColor: Colors.white,
+                                      ),
+                                      onPressed: () =>
+                                          Navigator.of(c).pop(true),
+                                      child: const Text(
+                                        'Konfirmasi',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.white,
+                                        ),
                                       ),
                                     ),
-                                  ),
-                                ],
-                              ),
-                            );
+                                  ],
+                                ),
+                              );
 
-                            if (confirmed != true || meeting.id <= 0) return;
+                              if (confirmed != true || meeting.id <= 0) return;
 
-                            try {
-                              if (isCancel) {
-                                await service.clearOverride(
-                                  meetingId: meeting.id,
-                                );
-                              } else {
-                                await service.submitOverride(
-                                  meetingId: meeting.id,
-                                  overrideType: type,
-                                );
+                              try {
+                                if (isCancel) {
+                                  await service.clearOverride(
+                                    meetingId: meeting.id,
+                                  );
+                                } else {
+                                  await service.submitOverride(
+                                    meetingId: meeting.id,
+                                    overrideType: type,
+                                  );
+                                }
+                                setDialogState(() {
+                                  currentOverride = isCancel ? null : type;
+                                });
+                                if (context.mounted) {
+                                  Navigator.of(dialogContext).pop();
+                                  onOverrideChanged?.call();
+                                }
+                              } catch (error) {
+                                // Surface the failure instead of swallowing it:
+                                // close the dialog first so the notification is
+                                // visible above the page.
+                                if (dialogContext.mounted) {
+                                  Navigator.of(dialogContext).pop();
+                                }
+                                if (viewContext.mounted) {
+                                  AppNotification.show(
+                                    viewContext,
+                                    title: isCancel
+                                        ? 'Gagal Membatalkan'
+                                        : 'Gagal Menyimpan',
+                                    message: friendlyErrorMessage(error),
+                                    color: Colors.red.shade600,
+                                    icon: Icons.error_outline,
+                                  );
+                                }
                               }
-                              setDialogState(() {
-                                currentOverride = isCancel ? null : type;
-                              });
-                              if (context.mounted) {
-                                Navigator.of(dialogContext).pop();
-                                onOverrideChanged?.call();
-                              }
-                            } catch (error) {
-                              // Surface the failure instead of swallowing it:
-                              // close the dialog first so the notification is
-                              // visible above the page.
-                              if (dialogContext.mounted) {
-                                Navigator.of(dialogContext).pop();
-                              }
-                              if (viewContext.mounted) {
-                                AppNotification.show(
-                                  viewContext,
-                                  title: isCancel
-                                      ? 'Gagal Membatalkan'
-                                      : 'Gagal Menyimpan',
-                                  message: friendlyErrorMessage(error),
-                                  color: Colors.red.shade600,
-                                  icon: Icons.error_outline,
-                                );
-                              }
-                            }
-                          },
-                        );
-                      }).toList(),
-                    ),
+                            },
+                          );
+                        }).toList(),
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
             actions: [

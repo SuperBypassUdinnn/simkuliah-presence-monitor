@@ -1,6 +1,7 @@
 // client/test/settings_automation_view_test.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:simkuliah_client/models/meeting_model.dart';
 import 'package:simkuliah_client/models/schedule_customization_model.dart';
 import 'package:simkuliah_client/models/schedule_model.dart';
 import 'package:simkuliah_client/models/user_preferences_model.dart';
@@ -18,14 +19,48 @@ const _schedule = ScheduleModel(
   lecturerName: 'Dr. X',
 );
 
+const _teoriCourse = ScheduleModel(
+  id: 2,
+  courseCode: 'SINF3031',
+  courseName: 'Kecerdasan Artifisial',
+  classGroup: 'C',
+  room: 'D.3.02',
+  startTime: '10:00:00',
+  endTime: '11:40:00',
+  lecturerName: 'Dr. Y',
+);
+
+const _praktikumCourse = ScheduleModel(
+  id: 3,
+  courseCode: 'SIF5001',
+  courseName: 'PRAKTIKUM KEAMANAN SIBER',
+  classGroup: 'A',
+  room: 'L.1.01',
+  startTime: '08:00:00',
+  endTime: '09:40:00',
+  lecturerName: 'Dr. Z',
+);
+
+MeetingModel _meetingWithDate(int id, int number, String date) {
+  return MeetingModel(
+    id: id,
+    courseName: 'PRAKTIKUM KEAMANAN SIBER',
+    meetingNumber: number,
+    meetingDate: date,
+    simkuliahStatus: 'pending',
+    isPresenceOpen: false,
+  );
+}
+
 Widget _buildView({
+  List<ScheduleModel> schedules = const [_schedule],
   List<ScheduleCustomizationModel> customizations = const [],
   PresenceService? presenceService,
 }) {
   return MaterialApp(
     home: SettingsAutomationView(
       presenceService: presenceService,
-      initialSchedules: const [_schedule],
+      initialSchedules: schedules,
       initialCustomizations: customizations,
       initialPreferences: const UserPreferencesModel(
         defaultReminderMinutes: 15,
@@ -44,6 +79,35 @@ class _FakePresenceService extends PresenceService {
     saved = customization;
     return customization.copyWith(id: customization.id ?? 10);
   }
+}
+
+class _FakeAutoPresenceService extends PresenceService {
+  final Map<int, bool> autoPresenceCalls = {};
+
+  @override
+  Future<ScheduleCustomizationModel> saveMeetingAutoPresence({
+    required int scheduleId,
+    required int meetingId,
+    required bool enabled,
+  }) async {
+    autoPresenceCalls[meetingId] = enabled;
+    return ScheduleCustomizationModel(
+      id: meetingId,
+      scheduleId: scheduleId,
+      meetingId: meetingId,
+      autoPresenceEnabled: enabled,
+    );
+  }
+}
+
+/// The course list lives in a lazily-built ListView; on the default 800x600
+/// test viewport the cards below the fold are never built, so finder-based
+/// assertions miss them. Tests that exercise the list or controls pushed
+/// down by the search field use a tall viewport instead.
+void _useTallViewport(WidgetTester tester) {
+  tester.view.physicalSize = const Size(1080, 2400);
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.reset);
 }
 
 void main() {
@@ -142,6 +206,7 @@ void main() {
   testWidgets(
     'switching to Relatif from official sets default +15m and shows chips',
     (tester) async {
+      _useTallViewport(tester);
       final fakeService = _FakePresenceService();
       await tester.pumpWidget(
         _buildView(presenceService: fakeService, customizations: const []),
@@ -175,6 +240,102 @@ void main() {
       await tester.pumpAndSettle();
       expect(fakeService.saved?.timeOffsetMinutes, 0);
       expect(find.text('+15m'), findsNothing);
+    },
+  );
+
+  testWidgets('praktikum/teori filter narrows the course list', (tester) async {
+    _useTallViewport(tester);
+    await tester.pumpWidget(
+      _buildView(schedules: const [_teoriCourse, _praktikumCourse]),
+    );
+    await tester.pumpAndSettle();
+
+    // Both courses are visible with the default "Semua" filter.
+    expect(find.text('Kecerdasan Artifisial'), findsOneWidget);
+    expect(find.text('PRAKTIKUM KEAMANAN SIBER'), findsOneWidget);
+
+    await tester.tap(find.text('Praktikum'));
+    await tester.pumpAndSettle();
+    expect(find.text('PRAKTIKUM KEAMANAN SIBER'), findsOneWidget);
+    expect(find.text('Kecerdasan Artifisial'), findsNothing);
+
+    await tester.tap(find.text('Teori'));
+    await tester.pumpAndSettle();
+    expect(find.text('Kecerdasan Artifisial'), findsOneWidget);
+    expect(find.text('PRAKTIKUM KEAMANAN SIBER'), findsNothing);
+
+    await tester.tap(find.text('Semua'));
+    await tester.pumpAndSettle();
+    expect(find.text('Kecerdasan Artifisial'), findsOneWidget);
+    expect(find.text('PRAKTIKUM KEAMANAN SIBER'), findsOneWidget);
+  });
+
+  testWidgets('course search narrows the list and can be cleared', (
+    tester,
+  ) async {
+    _useTallViewport(tester);
+    await tester.pumpWidget(
+      _buildView(schedules: const [_teoriCourse, _praktikumCourse]),
+    );
+    await tester.pumpAndSettle();
+
+    // Case-insensitive name search.
+    await tester.enterText(find.byType(TextField), 'keamanan');
+    await tester.pumpAndSettle();
+    expect(find.text('PRAKTIKUM KEAMANAN SIBER'), findsOneWidget);
+    expect(find.text('Kecerdasan Artifisial'), findsNothing);
+
+    // The suffix clear button restores the full list.
+    await tester.tap(find.byIcon(Icons.close));
+    await tester.pumpAndSettle();
+    expect(find.text('Kecerdasan Artifisial'), findsOneWidget);
+    expect(find.text('PRAKTIKUM KEAMANAN SIBER'), findsOneWidget);
+  });
+
+  testWidgets(
+    'auto-absen dialog locks past meetings and bulk-selects future only',
+    (tester) async {
+      _useTallViewport(tester);
+      final fakeService = _FakeAutoPresenceService();
+      final datedSchedule = ScheduleModel(
+        id: 9,
+        courseCode: 'SIF5001',
+        courseName: 'PRAKTIKUM KEAMANAN SIBER',
+        classGroup: 'A',
+        room: 'L.1.01',
+        startTime: '08:00:00',
+        endTime: '09:40:00',
+        lecturerName: 'Dr. Z',
+        meetings: [
+          _meetingWithDate(901, 1, '2026-01-05'),
+          _meetingWithDate(902, 2, '2030-01-01'),
+        ],
+      );
+      await tester.pumpWidget(
+        _buildView(schedules: [datedSchedule], presenceService: fakeService),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Pilih Pertemuan'));
+      await tester.pumpAndSettle();
+
+      // The past meeting carries the lock marker and a disabled switch.
+      expect(find.textContaining('Sudah lewat'), findsOneWidget);
+      final switches = tester
+          .widgetList<SwitchListTile>(find.byType(SwitchListTile))
+          .toList();
+      expect(switches.length, 2);
+      expect(switches[0].onChanged, isNull, reason: 'past meeting is locked');
+      expect(
+        switches[1].onChanged,
+        isNotNull,
+        reason: 'future meeting stays editable',
+      );
+
+      // "Pilih Semua" only enables the meeting that has not happened yet.
+      await tester.tap(find.text('Pilih Semua'));
+      await tester.pumpAndSettle();
+      expect(fakeService.autoPresenceCalls, {902: true});
     },
   );
 }
