@@ -13,6 +13,11 @@ import '../services/presence_service.dart';
 import 'widgets/active_lecture_card.dart';
 import 'widgets/error_state_view.dart';
 import 'widgets/gateway_alert_banner.dart';
+import 'widgets/weekly_timetable.dart';
+
+/// Which lens the Jadwal tab shows: today's attendance windows or the
+/// weekly class-entry timetable.
+enum _JadwalMode { absen, masuk }
 
 /// Today's feed: renders all of today's lecture meetings sorted by schedule
 /// start time. Strictly displays lecture details and allows local overrides
@@ -42,6 +47,9 @@ class _TodayFeedViewState extends State<TodayFeedView> {
   Object? _error;
   BackendHealthResult? _health;
   DateTime? _lastHealthCheckAt;
+
+  /// Active lens of the tab: presence feed or weekly class timetable.
+  _JadwalMode _mode = _JadwalMode.absen;
 
   @override
   void initState() {
@@ -151,13 +159,51 @@ class _TodayFeedViewState extends State<TodayFeedView> {
 
   @override
   Widget build(BuildContext context) {
+    final isMasuk = _mode == _JadwalMode.masuk;
     return Scaffold(
-      appBar: AppBar(title: const Text('Jadwal Kuliah Hari Ini')),
-      body: _buildBody(context),
+      appBar: AppBar(
+        title: Text(
+          isMasuk ? 'Jadwal Masuk Mingguan' : 'Jadwal Kuliah Hari Ini',
+        ),
+      ),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            child: SizedBox(
+              width: double.infinity,
+              child: SegmentedButton<_JadwalMode>(
+                segments: const [
+                  ButtonSegment(
+                    value: _JadwalMode.absen,
+                    label: Text('Absen'),
+                    icon: Icon(Icons.timer_outlined, size: 16),
+                  ),
+                  ButtonSegment(
+                    value: _JadwalMode.masuk,
+                    label: Text('Masuk'),
+                    icon: Icon(Icons.schedule_outlined, size: 16),
+                  ),
+                ],
+                selected: {_mode},
+                showSelectedIcon: false,
+                onSelectionChanged: (selection) =>
+                    setState(() => _mode = selection.first),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: isMasuk
+                ? WeeklyTimetable(presenceService: widget.presenceService)
+                : _buildAbsenBody(context),
+          ),
+        ],
+      ),
     );
   }
 
-  Widget _buildBody(BuildContext context) {
+  Widget _buildAbsenBody(BuildContext context) {
     if (_loading && _meetings == null) {
       return const Center(child: CircularProgressIndicator());
     }
