@@ -5,12 +5,18 @@ import 'package:simkuliah_client/models/schedule_model.dart';
 import 'package:simkuliah_client/services/presence_service.dart';
 import 'package:simkuliah_client/views/semester_matrix_view.dart';
 
-MeetingModel _meeting(int scheduleId, int number, {String status = 'pending'}) {
+MeetingModel _meeting(
+  int scheduleId,
+  int number, {
+  String status = 'pending',
+  String date = '',
+}) {
   return MeetingModel(
     id: scheduleId * 100 + number,
     scheduleId: scheduleId,
     courseName: 'Kursus',
     meetingNumber: number,
+    meetingDate: date,
     simkuliahStatus: status,
     isPresenceOpen: false,
   );
@@ -140,5 +146,42 @@ void main() {
     expect(recap.right, lessThanOrEqualTo(1280));
     final progress = tester.getRect(find.byType(LinearProgressIndicator).first);
     expect(progress.right, lessThanOrEqualTo(1280));
+  });
+
+  testWidgets('detail dialog resolves the day of week from the meeting date', (
+    tester,
+  ) async {
+    // 2026-11-21 falls on a Saturday; Simkuliah carries no explicit day
+    // field, so the dialog derives the day from the date.
+    final datedCourse = ScheduleModel(
+      id: 7,
+      courseCode: 'SIF5001',
+      courseName: 'PRAKTIKUM KEAMANAN SIBER',
+      classGroup: 'A',
+      room: 'L.1.01',
+      startTime: '08:00',
+      endTime: '09:40',
+      lecturerName: 'Dosen A',
+      meetings: [_meeting(7, 1, status: 'hadir', date: '2026-11-21')],
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SemesterMatrixView(
+            presenceService: _FakePresenceService([datedCourse]),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byType(MeetingGridTile).first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Hari'), findsOneWidget);
+    expect(find.text('Sabtu'), findsOneWidget);
+    expect(find.text('Tanggal'), findsOneWidget);
+    expect(find.text('2026-11-21'), findsOneWidget);
   });
 }

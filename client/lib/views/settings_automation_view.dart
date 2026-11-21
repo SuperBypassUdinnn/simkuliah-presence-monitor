@@ -9,6 +9,7 @@ import '../core/app_notification.dart';
 import '../core/error_message.dart';
 import '../core/load_epoch_guard.dart';
 import '../core/refresh_bus.dart';
+import '../models/meeting_model.dart';
 import '../models/schedule_customization_model.dart';
 import '../models/schedule_model.dart';
 import '../models/user_preferences_model.dart';
@@ -17,6 +18,10 @@ import 'widgets/error_state_view.dart';
 
 /// How a course's effective lecture time is derived.
 enum _TimingMode { official, relative, absolute }
+
+/// Course list filter in the settings tab. Praktikum detection matches the
+/// course name, mirroring how Simkuliah names its lab courses.
+enum _CourseFilter { all, praktikum, teori }
 
 /// Day labels indexed by the database `custom_day_of_week` value (1 = Monday).
 const List<String> _dayLabels = [
@@ -60,6 +65,10 @@ class _SettingsAutomationViewState extends State<SettingsAutomationView> {
   UserPreferencesModel? _preferences;
   bool _loading = true;
   Object? _error;
+
+  /// Course list search query and praktikum/teori filter (Task F-038 #1).
+  String _courseQuery = '';
+  _CourseFilter _courseFilter = _CourseFilter.all;
 
   static const List<int> _reminderTemplates = [10, 15, 30];
 
@@ -453,6 +462,7 @@ class _SettingsAutomationViewState extends State<SettingsAutomationView> {
     }
 
     final schedules = _schedules ?? const <ScheduleModel>[];
+    final filtered = _filteredSchedules(schedules);
     return RefreshIndicator(
       onRefresh: () => _load(silent: true, force: true),
       child: ListView(
@@ -477,10 +487,90 @@ class _SettingsAutomationViewState extends State<SettingsAutomationView> {
                 ),
               ),
             )
-          else
-            ...schedules.map((s) => _buildCourseCard(context, s)),
+          else ...[
+            _buildCourseSearchField(context),
+            const SizedBox(height: 8),
+            _buildCourseFilterChips(context),
+            const SizedBox(height: 8),
+            if (filtered.isEmpty)
+              const Padding(
+                padding: EdgeInsets.all(24),
+                child: Center(
+                  child: Text(
+                    'Tidak ada mata kuliah yang cocok dengan pencarian.',
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                ),
+              )
+            else
+              ...filtered.map((s) => _buildCourseCard(context, s)),
+          ],
         ],
       ),
+    );
+  }
+
+  /// True when the course is a lab (praktikum) course, detected from the
+  /// course name the same way Simkuliah names its praktikum offerings.
+  bool _isPraktikumCourse(ScheduleModel schedule) =>
+      schedule.courseName.toLowerCase().contains('praktikum');
+
+  /// Apply the search query and praktikum/teori filter to the course list.
+  List<ScheduleModel> _filteredSchedules(List<ScheduleModel> schedules) {
+    final query = _courseQuery.trim().toLowerCase();
+    return schedules.where((schedule) {
+      final matchesQuery =
+          query.isEmpty || schedule.courseName.toLowerCase().contains(query);
+      final matchesFilter = switch (_courseFilter) {
+        _CourseFilter.all => true,
+        _CourseFilter.praktikum => _isPraktikumCourse(schedule),
+        _CourseFilter.teori => !_isPraktikumCourse(schedule),
+      };
+      return matchesQuery && matchesFilter;
+    }).toList();
+  }
+
+  Widget _buildCourseSearchField(BuildContext context) {
+    return TextField(
+      onChanged: (value) => setState(() => _courseQuery = value),
+      decoration: InputDecoration(
+        hintText: 'Cari mata kuliah...',
+        prefixIcon: const Icon(Icons.search),
+        suffixIcon: _courseQuery.isEmpty
+            ? null
+            : IconButton(
+                icon: const Icon(Icons.close, size: 18),
+                onPressed: () => setState(() => _courseQuery = ''),
+              ),
+        isDense: true,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
+  }
+
+  Widget _buildCourseFilterChips(BuildContext context) {
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: [
+        ChoiceChip(
+          label: const Text('Semua'),
+          selected: _courseFilter == _CourseFilter.all,
+          onSelected: (_) => setState(() => _courseFilter = _CourseFilter.all),
+        ),
+        ChoiceChip(
+          label: const Text('Praktikum'),
+          selected: _courseFilter == _CourseFilter.praktikum,
+          onSelected: (_) =>
+              setState(() => _courseFilter = _CourseFilter.praktikum),
+        ),
+        ChoiceChip(
+          label: const Text('Teori'),
+          selected: _courseFilter == _CourseFilter.teori,
+          onSelected: (_) =>
+              setState(() => _courseFilter = _CourseFilter.teori),
+        ),
+      ],
     );
   }
 
@@ -962,11 +1052,30 @@ class _AutoPresenceMeetingsDialogState
     _enabled = Map.from(widget.initialEnabled);
   }
 
+  /// True when the meeting has already happened: its date lies before today,
+  /// or it is today and the official lecture window has ended. Auto-absen
+  /// toggles are locked for past meetings so late edits (including the bulk
+  /// "Pilih Semua" shortcut) cannot retroactively change what automation
+  /// would have done. Unparseable dates fail open and stay editable.
+  bool _isPast(MeetingModel meeting) {
+    final date = DateTime.tryParse(meeting.meetingDate);
+    if (date == null) return false;
+    final end = _parseHm(widget.schedule.endTime);
+    final endAt = DateTime(date.year, date.month, date.day, end.$1, end.$2);
+    return DateTime.now().isAfter(endAt);
+  }
+
+  /// Meetings that are still toggleable, i.e. not yet past.
+  List<MeetingModel> get _editableMeetings =>
+      widget.schedule.meetings.where((m) => !_isPast(m)).toList();
+
   bool get _allEnabled =>
-      widget.schedule.meetings.every((m) => _enabled[m.id] == true);
+      _editableMeetings.isNotEmpty &&
+      _editableMeetings.every((m) => _enabled[m.id] == true);
 
   void _toggleAll(bool enable) {
-    for (final m in widget.schedule.meetings) {
+    // Bulk actions only touch editable meetings; past ones stay locked.
+    for (final m in _editableMeetings) {
       if ((_enabled[m.id] ?? false) != enable) {
         setState(() => _enabled[m.id] = enable);
         widget.onToggle(m.id, enable);
@@ -974,10 +1083,22 @@ class _AutoPresenceMeetingsDialogState
     }
   }
 
+  /// Parse an `HH:mm[:ss]` time string into (hour, minute); falls back to
+  /// 23:59 so a malformed end time never locks a whole day's meetings.
+  (int, int) _parseHm(String raw) {
+    final match = RegExp(r'(\d{1,2})[:.](\d{2})').firstMatch(raw);
+    if (match == null) return (23, 59);
+    return (
+      int.tryParse(match.group(1)!) ?? 23,
+      int.tryParse(match.group(2)!) ?? 59,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final meetings = widget.schedule.meetings;
     final enabledCount = _enabled.values.where((v) => v).length;
+    final lockedCount = meetings.length - _editableMeetings.length;
 
     return AlertDialog(
       title: Column(
@@ -989,60 +1110,87 @@ class _AutoPresenceMeetingsDialogState
           ),
           const SizedBox(height: 4),
           Text(
-            '$enabledCount dari ${meetings.length} pertemuan aktif',
+            '$enabledCount dari ${meetings.length} pertemuan aktif'
+            '${lockedCount > 0 ? ' · $lockedCount sudah lewat' : ''}',
             style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
           ),
         ],
       ),
       contentPadding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-      content: SizedBox(
-        width: double.maxFinite,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // "Pilih Semua" / "Batalkan Semua" quick-action.
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => _toggleAll(!_allEnabled),
-                    child: Text(_allEnabled ? 'Batalkan Semua' : 'Pilih Semua'),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            const Divider(height: 1),
-            Flexible(
-              child: ListView.builder(
-                shrinkWrap: true,
-                itemCount: meetings.length,
-                itemBuilder: (_, i) {
-                  final meeting = meetings[i];
-                  final isEnabled = _enabled[meeting.id] ?? false;
-                  return SwitchListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    title: Text(
-                      'Pertemuan ${meeting.meetingNumber}',
-                      style: const TextStyle(fontSize: 13),
+      // Cap the dialog height so short lists render as a compact centered
+      // dialog and long lists scroll internally instead of stretching the
+      // dialog edge-to-edge across the screen.
+      content: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * 0.65,
+        ),
+        child: SizedBox(
+          width: double.maxFinite,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // "Pilih Semua" / "Batalkan Semua" quick-action.
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _editableMeetings.isEmpty
+                          ? null
+                          : () => _toggleAll(!_allEnabled),
+                      child: Text(
+                        _allEnabled ? 'Batalkan Semua' : 'Pilih Semua',
+                      ),
                     ),
-                    subtitle: meeting.meetingDate.isNotEmpty
-                        ? Text(
-                            meeting.meetingDate,
-                            style: const TextStyle(fontSize: 11),
-                          )
-                        : null,
-                    value: isEnabled,
-                    onChanged: (val) {
-                      setState(() => _enabled[meeting.id] = val);
-                      widget.onToggle(meeting.id, val);
-                    },
-                  );
-                },
+                  ),
+                ],
               ),
-            ),
-          ],
+              const SizedBox(height: 8),
+              const Divider(height: 1),
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: meetings.length,
+                  itemBuilder: (_, i) {
+                    final meeting = meetings[i];
+                    final isPast = _isPast(meeting);
+                    final isEnabled = _enabled[meeting.id] ?? false;
+                    return Opacity(
+                      opacity: isPast ? 0.55 : 1.0,
+                      child: SwitchListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(
+                          'Pertemuan ${meeting.meetingNumber}',
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                        subtitle: meeting.meetingDate.isNotEmpty
+                            ? Text(
+                                isPast
+                                    ? '${meeting.meetingDate} · Sudah lewat'
+                                    : meeting.meetingDate,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: isPast
+                                      ? Colors.red.shade300
+                                      : Colors.grey.shade600,
+                                ),
+                              )
+                            : null,
+                        value: isEnabled,
+                        // Past meetings are locked: no enable, no disable.
+                        onChanged: isPast
+                            ? null
+                            : (val) {
+                                setState(() => _enabled[meeting.id] = val);
+                                widget.onToggle(meeting.id, val);
+                              },
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
         ),
       ),
       actions: [
