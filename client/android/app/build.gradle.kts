@@ -5,7 +5,12 @@ plugins {
 }
 
 android {
-    namespace = "com.example.simkuliah_client"
+    // Namespace is the R/BuildConfig and manifest package. It stays identical
+    // to applicationId so the launcher activity resolves as
+    // <applicationId>.MainActivity; the Flutter template default
+    // (com.example.<name>) would otherwise force adb/automation callers to
+    // look the component up with `cmd package resolve-activity`.
+    namespace = "com.superbypassudin.simkuliah_monitor"
     // flutter_local_notifications 23 requires Android API 37 to compile.
     compileSdk = 37
     ndkVersion = flutter.ndkVersion
